@@ -173,38 +173,57 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
 def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex: bool) -> str:
     """
     Formats Stage 1 and Stage 2 commands into a clean, human-readable multi-line bash block.
-    Encloses filter_complex in a single quoted string across multiple lines.
+    Ensures metadata paths and pipe arguments are cleanly escaped and explicitly positioned.
     """
     out_lines = []
     
-    # Stage 1 Header
-    str_pre = " ".join(shlex.quote(c) for c in cmd_stage1_pre)
-    out_lines.append(f"{str_pre} \\")
+    # Stage 1: Header + Input seeks
+    out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
+    
+    # Parse Stage 1 inputs (-ss ... -to ... -i ...)
+    i = 0
+    while i < len(cmd_stage1_pre):
+        arg = cmd_stage1_pre[i]
+        if arg == "-ss" and i + 5 < len(cmd_stage1_pre):
+            s_val = cmd_stage1_pre[i+1]
+            to_arg = cmd_stage1_pre[i+2]
+            to_val = cmd_stage1_pre[i+3]
+            i_arg = cmd_stage1_pre[i+4]
+            i_val = cmd_stage1_pre[i+5]
+            out_lines.append(f"  {arg} {s_val} {to_arg} {to_val} {i_arg} {shlex.quote(i_val)} \\")
+            i += 6
+        else:
+            i += 1
 
-    # Filter Graph Formatting
+    # Stage 1: Filter Graph & Output Pipe
     if is_complex:
         out_lines.append("  -filter_complex \"\\")
         for idx, line in enumerate(filter_lines):
-            # Join filter streams with semicolons inside the quoted string block
             if idx < len(filter_lines) - 1:
                 out_lines.append(f"    {line}; \\")
             else:
                 out_lines.append(f"    {line}\" \\")
+        out_lines.append("  -map \"[outv]\" -map \"[outa]\" -c:v rawvideo -pix_fmt yuv420p -f nut pipe:1 \\")
+    else:
+        vf_idx = output_pipe_args.index("-vf") if "-vf" in output_pipe_args else -1
+        vf_str = output_pipe_args[vf_idx + 1] if vf_idx != -1 else ""
+        out_lines.append(f"  -vf {shlex.quote(vf_str)} -af \"asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000\" \\")
+        out_lines.append("  -c:v rawvideo -pix_fmt yuv420p -f nut pipe:1 \\")
 
-    # Stage 1 Output Pipe Arguments
-    str_pipe = " ".join(shlex.quote(c) for c in output_pipe_args)
-    out_lines.append(f"  {str_pipe} \\")
+    # Extract dynamic inputs from cmd_stage2 array safely
+    # Input 0 = pipe:0, Input 1 = metadata file (follows second '-i')
+    i_indices = [idx for idx, x in enumerate(cmd_stage2) if x == "-i"]
+    meta_path = cmd_stage2[i_indices[1] + 1] if len(i_indices) > 1 else ""
+    out_mp4_path = cmd_stage2[-1]
 
-    # Pipe Symbol
-    out_lines.append("| " + shlex.quote(cmd_stage2[0]) + " \\")
-
-    # Stage 2 Arguments
-    for arg_idx, arg in enumerate(cmd_stage2[1:], start=1):
-        q_arg = shlex.quote(arg)
-        if arg_idx < len(cmd_stage2) - 1:
-            out_lines.append(f"  {q_arg} \\")
-        else:
-            out_lines.append(f"  {q_arg}")
+    # Stage 2: Clean, explicit grouping
+    out_lines.append("| ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
+    out_lines.append(f"  -f nut -i pipe:0 -i {shlex.quote(meta_path)} \\")
+    out_lines.append("  -map 0:v -map 0:a -map_metadata 1 -map_chapters 1 -movflags +faststart \\")
+    out_lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
+    out_lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
+    out_lines.append("  -c:a aac -b:a 192k -shortest \\")
+    out_lines.append(f"  {shlex.quote(out_mp4_path)}")
 
     return "\n".join(out_lines)
 
@@ -431,7 +450,7 @@ def main():
                 if is_gapped or len(segments) > 1:
                     for idx in range(len(segments)):
                         filter_lines.append(f"[{idx}:v]{vf_base}[v{idx}]")
-                        filter_lines.append(f"[{idx}:a]aresample=async=1[a{idx}]")
+                        filter_lines.append(f"[{idx}:a]asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000[a{idx}]")
                     
                     concat_inputs = "".join(f"[v{idx}][a{idx}]" for idx in range(len(segments)))
                     filter_lines.append(f"{concat_inputs}concat=n={len(segments)}:v=1:a=1[outv][outa]")
@@ -446,7 +465,7 @@ def main():
                 else:
                     output_pipe_args = [
                         "-vf", vf_base,
-                        "-af", "aresample=async=1",
+                        "-af", "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000",
                         "-c:v", "rawvideo", "-pix_fmt", "yuv420p",
                         "-f", "nut", "pipe:1"
                     ]
