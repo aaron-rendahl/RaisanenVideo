@@ -170,17 +170,22 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
     return "\n".join(lines) + "\n"
 
 
-def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex: bool) -> str:
+def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex: bool, clip_id: str) -> str:
     """
-    Formats Stage 1 and Stage 2 commands into a clean, human-readable multi-line bash block.
-    Ensures metadata paths and pipe arguments are cleanly escaped and explicitly positioned.
+    Formats Stage 1 and Stage 2 as sequential commands using a temporary intermediate 
+    lossless file to ensure macOS QuickLook previews render properly in Finder.
+    Includes a bash trap for automatic cleanup.
     """
     out_lines = []
     
-    # Stage 1: Header + Input seeks
+    # 1. Setup temporary file path and trap cleanup
+    tmp_file = f"/tmp/stage1_{clip_id}.mkv"
+    out_lines.append(f"TMP_FILE={shlex.quote(tmp_file)}")
+    out_lines.append("trap 'rm -f \"$TMP_FILE\"' EXIT\n")
+    
+    # 2. Stage 1: Decode, Deinterlace, Crop, and save Lossless (Ut Video / PCM)
     out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
     
-    # Parse Stage 1 inputs (-ss ... -to ... -i ...)
     i = 0
     while i < len(cmd_stage1_pre):
         arg = cmd_stage1_pre[i]
@@ -195,7 +200,6 @@ def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cm
         else:
             i += 1
 
-    # Stage 1: Filter Graph & Output Pipe
     if is_complex:
         out_lines.append("  -filter_complex \"\\")
         for idx, line in enumerate(filter_lines):
@@ -203,22 +207,20 @@ def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cm
                 out_lines.append(f"    {line}; \\")
             else:
                 out_lines.append(f"    {line}\" \\")
-        out_lines.append("  -map \"[outv]\" -map \"[outa]\" -c:v rawvideo -pix_fmt yuv420p -f nut pipe:1 \\")
+        out_lines.append("  -map \"[outv]\" -map \"[outa]\" -c:v utvideo -c:a pcm_s16le \"$TMP_FILE\"\n")
     else:
         vf_idx = output_pipe_args.index("-vf") if "-vf" in output_pipe_args else -1
         vf_str = output_pipe_args[vf_idx + 1] if vf_idx != -1 else ""
         out_lines.append(f"  -vf {shlex.quote(vf_str)} -af \"asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000\" \\")
-        out_lines.append("  -c:v rawvideo -pix_fmt yuv420p -f nut pipe:1 \\")
+        out_lines.append("  -c:v utvideo -c:a pcm_s16le \"$TMP_FILE\"\n")
 
-    # Extract dynamic inputs from cmd_stage2 array safely
-    # Input 0 = pipe:0, Input 1 = metadata file (follows second '-i')
+    # 3. Stage 2: Encode to MP4 using the intermediate file input
     i_indices = [idx for idx, x in enumerate(cmd_stage2) if x == "-i"]
     meta_path = cmd_stage2[i_indices[1] + 1] if len(i_indices) > 1 else ""
     out_mp4_path = cmd_stage2[-1]
 
-    # Stage 2: Clean, explicit grouping
-    out_lines.append("| ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
-    out_lines.append(f"  -f nut -i pipe:0 -i {shlex.quote(meta_path)} \\")
+    out_lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
+    out_lines.append(f"  -i \"$TMP_FILE\" -i {shlex.quote(meta_path)} \\")
     out_lines.append("  -map 0:v -map 0:a -map_metadata 1 -map_chapters 1 -movflags +faststart \\")
     out_lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
     out_lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
@@ -226,7 +228,6 @@ def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cm
     out_lines.append(f"  {shlex.quote(out_mp4_path)}")
 
     return "\n".join(out_lines)
-
 
 def clean_directory(dir_path: Path, do_uncropped: bool = False, do_cropped: bool = False, frames_mode: bool = False, test_mode: bool = False):
     """Targeted removal of PNG snapshots, test MP4s, and log files based on run mode."""
@@ -502,7 +503,14 @@ def main():
                     script_filename = f"encode_{clip.idx}_{safe_title}.sh"
                     sub_script_path = tape_log_dir / script_filename
                     
-                    multiline_cmd = format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex)
+                    multiline_cmd = format_multiline_pipeline(
+                        cmd_stage1_pre,
+                        filter_lines,
+                        output_pipe_args,
+                        cmd_stage2,
+                        is_complex,
+                        clip_id=str(getattr(clip, "id", getattr(clip, "num", "temp"))),
+                    )         
                     
                     script_body = [
                         "#!/usr/bin/env bash",
