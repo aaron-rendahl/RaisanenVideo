@@ -173,6 +173,7 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
 def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex: bool) -> str:
     """
     Formats Stage 1 and Stage 2 commands into a clean, human-readable multi-line bash block.
+    Encloses filter_complex in a single quoted string across multiple lines.
     """
     out_lines = []
     
@@ -182,19 +183,14 @@ def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cm
 
     # Filter Graph Formatting
     if is_complex:
-        out_lines.append("  -filter_complex \\")
-        formatted_filters = []
-        for line in filter_lines:
-            escaped_line = shlex.quote(line)
-            formatted_filters.append(f"    {escaped_line}")
-        
-        # Add trailing backslashes to filter lines
-        for idx in range(len(formatted_filters)):
-            if idx < len(formatted_filters) - 1:
-                out_lines.append(f"{formatted_filters[idx]} ; \\")
+        out_lines.append("  -filter_complex \"\\")
+        for idx, line in enumerate(filter_lines):
+            # Join filter streams with semicolons inside the quoted string block
+            if idx < len(filter_lines) - 1:
+                out_lines.append(f"    {line}; \\")
             else:
-                out_lines.append(f"{formatted_filters[idx]} \\")
-    
+                out_lines.append(f"    {line}\" \\")
+
     # Stage 1 Output Pipe Arguments
     str_pipe = " ".join(shlex.quote(c) for c in output_pipe_args)
     out_lines.append(f"  {str_pipe} \\")
