@@ -18,6 +18,7 @@ class ClipSpec:
     start: str
     end: str
     crop: str = ""
+    date: str = ""
     subchapters: list = None
 
     def __post_init__(self):
@@ -28,6 +29,7 @@ class ClipSpec:
 @dataclass
 class TapeSpec:
     global_crop: str = ""
+    global_date: str = ""
     clips: list = None
 
     def __post_init__(self):
@@ -45,8 +47,8 @@ class TapeSpec:
 
 
 def read_tape_spec(spec_text: str) -> TapeSpec:
-    """Parses tape specifications supporting multi-clip and single-clip formats,
-    explicit clip timestamps, and key-value metadata (date=..., crop=...).
+    """Parses tape specifications supporting GLOBAL_CROP, GLOBAL_DATE,
+    optional end timestamps, and per-clip key-value metadata.
     """
     tape = TapeSpec()
     current_clip = None
@@ -56,11 +58,14 @@ def read_tape_spec(spec_text: str) -> TapeSpec:
         if not line or line.startswith("#"):
             continue
 
-        # Global header settings (e.g. GLOBAL_CROP = 12 24 0 8)
+        # Top-level global header settings (e.g. GLOBAL_CROP = ..., GLOBAL_DATE = ...)
         if "=" in line and "|" not in line and not line.startswith("0") and not line.startswith("1"):
             key, val = line.split("=", 1)
-            if key.strip().upper() in ("GLOBAL_CROP", "CROP"):
+            key_upper = key.strip().upper()
+            if key_upper in ("GLOBAL_CROP", "CROP"):
                 tape.global_crop = val.strip()
+            elif key_upper in ("GLOBAL_DATE", "DATE"):
+                tape.global_date = val.strip()
             continue
 
         parts = [p.strip() for p in line.split("|")]
@@ -69,38 +74,45 @@ def read_tape_spec(spec_text: str) -> TapeSpec:
 
         is_timestamp_line = len(parts) > 1 and ":" in parts[1]
 
-        # Case A: Subchapter with decimal index (e.g. 01.1 | 00:00:02.336 | ...)
+        # Helper to extract start, end, and title from timestamp lines
+        def parse_timestamp_parts(p_list):
+            s_time = p_list[1]
+            if len(p_list) > 2 and ":" in p_list[2]:
+                e_time = p_list[2]
+                title = p_list[3] if len(p_list) > 3 else ""
+            else:
+                e_time = ""
+                title = p_list[2] if len(p_list) > 2 else ""
+            return s_time, e_time, title
+
+        # Case A: Subchapter with decimal index (e.g. 01.1 | 00:00:02.336 | Sandy in kitchen)
         if "." in parts[0]:
             if current_clip:
-                s_time = parts[1]
-                e_time = parts[2] if len(parts) > 2 else ""
-                sub_title = parts[3] if len(parts) > 3 else ""
+                s_time, e_time, sub_title = parse_timestamp_parts(parts)
                 current_clip.subchapters.append((s_time, e_time, sub_title))
 
-        # Case B: Single-clip chapter line (e.g. 01 | 00:00:01.168 | | arrival)
+        # Case B: Single-clip chapter line (e.g. 01 | 00:00:01.168 | arrival)
         elif is_timestamp_line and current_clip and len(tape.clips) == 1 and not current_clip.start:
-            s_time = parts[1]
-            e_time = parts[2] if len(parts) > 2 else ""
-            sub_title = parts[3] if len(parts) > 3 else ""
+            s_time, e_time, sub_title = parse_timestamp_parts(parts)
             current_clip.subchapters.append((s_time, e_time, sub_title))
 
-        # Case C: Standalone timestamp clip (e.g. 07 | 01:01:51.942 | 01:11:14.804 | birthday party)
+        # Case C: Standalone timestamp clip (e.g. 07 | 01:01:51.942 | birthday party)
         elif is_timestamp_line:
             idx = parts[0]
-            start = parts[1]
-            end = parts[2] if len(parts) > 2 else ""
-            title = parts[3] if len(parts) > 3 else f"Clip {idx}"
-            crop = ""
-            for extra in parts[4:]:
+            s_time, e_time, title = parse_timestamp_parts(parts)
+            title = title or f"Clip {idx}"
+            crop, date = "", tape.global_date
+            for extra in parts[3:]:
                 if extra.startswith("crop="):
                     crop = extra.split("=", 1)[1].strip()
+                elif extra.startswith("date="):
+                    date = extra.split("=", 1)[1].strip()
 
-            current_clip = ClipSpec(idx=idx, title=title, start=start, end=end, crop=crop)
+            current_clip = ClipSpec(idx=idx, title=title, start=s_time, end=e_time, crop=crop, date=date)
             tape.clips.append(current_clip)
 
         # Case D: Top-level parent clip or single tape title
         else:
-            # If parts[0] is non-numeric, treat as single tape title (e.g., "Willy's 40th Birthday Party")
             if not parts[0].isdigit():
                 idx = "01"
                 title = parts[0]
@@ -110,16 +122,18 @@ def read_tape_spec(spec_text: str) -> TapeSpec:
                 title = parts[1] if len(parts) > 1 else f"Clip {idx}"
                 extra_parts = parts[2:]
 
-            crop = ""
+            crop, date = "", tape.global_date
             for extra in extra_parts:
                 if extra.startswith("crop="):
                     crop = extra.split("=", 1)[1].strip()
+                elif extra.startswith("date="):
+                    date = extra.split("=", 1)[1].strip()
 
-            current_clip = ClipSpec(idx=idx, title=title, start="", end="", crop=crop)
+            current_clip = ClipSpec(idx=idx, title=title, start="", end="", crop=crop, date=date)
             tape.clips.append(current_clip)
 
     return tape
-
+  
 def parse_timestamp_to_seconds(ts: str) -> float:
     """Converts HH:MM:SS.mmm or MM:SS.mmm string to total seconds."""
     if not ts:
