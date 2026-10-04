@@ -40,7 +40,6 @@ Flags:
 
 Directory Structure:
   Input Archival:     01_archive/<TAPE_NAME>.mkv
-  Input Spec:         03_specs/<TAPE_NAME>.txt
   Output Clips:       02_clips/<TAPE_NAME>/<TAPE_NAME>_<CLIP_IDX>_<TITLE>.mp4
   Diagnostics & Log:  02_clips/<TAPE_NAME>-log/ (contains meta_XX.txt, meta_XX.vtt, logs, scripts)
 """
@@ -55,7 +54,19 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-# Import helpers from sidecar module
+# Base Directory Paths
+BASE_DIR = Path(__file__).resolve().parent.parent
+ARCHIVE_DIR = BASE_DIR / "01_archive"
+CLIPS_DIR = BASE_DIR / "02_clips"
+SRC_DIR = BASE_DIR / "src"
+
+# Add src/ to sys.path for mkv_reader and video_duration imports
+sys.path.insert(0, str(SRC_DIR))
+
+from mkv_reader import read_mkv_metadata
+from video_duration import get_video_duration
+
+# Import execution helpers from sidecar module
 from tape_utils import (
     build_clip_pipeline,
     build_crop_filter,
@@ -64,18 +75,10 @@ from tape_utils import (
     format_elapsed_time,
     format_pipeline_to_bash,
     generate_concat_ffmetadata,
-    get_video_duration,
     has_gaps,
     parse_timestamp_to_seconds,
-    read_tape_spec,
     resolve_subsegments,
 )
-
-# Base Directory Paths
-BASE_DIR = Path(__file__).resolve().parent.parent
-ARCHIVE_DIR = BASE_DIR / "01_archive"
-CLIPS_DIR = BASE_DIR / "02_clips"
-SPECS_DIR = BASE_DIR / "03_specs"
 
 ACTIVE_TEMP_FILES = set()
 
@@ -136,12 +139,21 @@ def parse_cli_args(argv: list[str]) -> CLIConfig:
         do_cropped="--cropped-frames" in argv or "--frames-only" in argv,
     )
 
+
 def capture_diagnostic_frames(
-    clip, segments: list, mkv_path: Path, tape_log_dir: Path,
-    ffmpeg_crop: str, cfg: CLIConfig, log_file, single_script_lines: list[str]
+    clip,
+    segments: list,
+    mkv_path: Path,
+    tape_log_dir: Path,
+    ffmpeg_crop: str,
+    cfg: CLIConfig,
+    log_file,
+    single_script_lines: list[str],
 ) -> None:
     """Captures diagnostic frame snapshots for uncropped ('a') and cropped ('b') states."""
-    safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title).strip().replace(" ", "_")
+    safe_title = "".join(
+        c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title
+    ).strip().replace(" ", "_")
     tape_stem = tape_log_dir.name.replace("-log", "")
     clip_prefix = f"{tape_stem}_{clip.idx}_{safe_title}"
 
@@ -257,14 +269,15 @@ def main():
     tape_output_dir.mkdir(exist_ok=True)
     tape_log_dir.mkdir(exist_ok=True)
 
-    spec_path = SPECS_DIR / f"{cfg.tape_name}.txt"
     mkv_path = ARCHIVE_DIR / f"{cfg.tape_name}.mkv"
 
-    if not spec_path.exists() or not mkv_path.exists():
-        print("Error: Spec file or archival MKV missing.")
+    if not mkv_path.exists():
+        print(f"Error: Archival MKV missing at '{mkv_path}'.")
         sys.exit(1)
 
-    data = read_tape_spec(spec_path.read_text())
+    print(f"Reading master metadata directly from container: {mkv_path.name}")
+    data = read_mkv_metadata(str(mkv_path))
+    
     total_duration_str = get_video_duration(str(mkv_path))
     data.resolve_missing_end_times(total_duration_str)
     total_duration_sec = parse_timestamp_to_seconds(total_duration_str)
@@ -322,25 +335,22 @@ def main():
                 )
                 continue
 
-              # 1. Determine base file stem
-              if len(tape.clips) == 1:
-                  base_stem = cfg.tape_name
-              else:
-                  base_stem = f"{cfg.tape_name}_{clip.idx}_{safe_title}"
-              
-              # 2. Resolve output directory and filename based on test mode
-              if cfg.do_test:
-                  output_mp4 = tape_log_dir / f"{base_stem}_test.mp4"
-              else:
-                  output_mp4 = tape_output_dir / f"{base_stem}.mp4"
-            )
+            # 1. Determine base file stem
+            if len(data.clips) == 1:
+                base_stem = cfg.tape_name
+            else:
+                base_stem = f"{cfg.tape_name}_{clip.idx}_{safe_title}"
+            
+            # 2. Resolve output directory and filename based on test mode
+            if cfg.do_test:
+                output_mp4 = tape_log_dir / f"{base_stem}_test.mp4"
+            else:
+                output_mp4 = tape_output_dir / f"{base_stem}.mp4"
+
             meta_file_path = tape_log_dir / f"meta_{clip.idx}.txt"
             vtt_file_path = tape_log_dir / f"meta_{clip.idx}.vtt"
 
-            meta_file_path.write_text(
-                generate_concat_ffmetadata(clip, segments, is_test=cfg.do_test),
-                encoding="utf-8",
-            )
+            generate_concat_ffmetadata(clip, segments, str(meta_file_path), is_test=cfg.do_test)
             convert_ffmetadata_to_vtt(str(meta_file_path), str(vtt_file_path))
 
             vf_base = (
