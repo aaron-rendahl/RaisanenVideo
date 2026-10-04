@@ -1,7 +1,7 @@
-GLOBAL CROP = 10 12 0 8
+TITLE = You Can’t Take It With You
 GLOBAL_DATE = 1999-06-20
+GLOBAL_CROP = 10 12 0 8
 
-You Can’t Take It With You
 01|00:00:00|Act I, Scene 1
 02|00:06:15|Smoke Alarm!
 03|00:08:55|Play continues...
