@@ -1,32 +1,32 @@
-## Crop: 12 24 0 8
+GLOBAL_CROP = 12 24 0 8
 
-01|||First Videos|
+01  |First Videos
 01.1|00:00:02.336|00:00:51.184|Sandy in kitchen
 01.2|00:00:51.218|00:02:41.728|Dale in garden
 01.3|00:02:41.795|00:03:44.191|kids in kitchen
 01.4|00:03:44.291|00:04:47.754|boys basketball
 01.5|00:04:47.988|00:06:02.696|girls inside
 
-02|||Raisanen Family Gathering
+02  |Raisanen Family Gathering
 02.1|00:06:02.829|00:07:17.137|family at table
 02.2|00:18:12.224|00:19:13.319|around house
 02.3|00:19:13.386|00:21:25.351|family
 
-03|||Joe & Willy Karate
+03  |Joe & Willy Karate
 03.1|00:21:27.153|00:22:36.789|Joe karate inside
 03.2|00:22:37.756|00:23:41.420|Joe karate outside
 03.3|00:23:41.487|00:24:48.921|Willy karate outside
 
-04|||Arnold and Eva visit
+04  |Arnold and Eva visit
 04.1|00:24:51.190|00:25:52.184|Arnold and Eva
 04.2|00:25:52.251|00:26:36.728|reading with kids
 04.3|00:26:36.862|00:28:36.615|Arnold and Eva
 
-05|||Outside 37 Randall Ave
+05  |Outside 37 Randall Ave
 05.1|00:28:38.917|00:29:47.853|house and deck
 05.2|00:29:47.953|00:30:41.139|planting window wells
 
-06 |||At the Lake|1987-05-24
+06   |At the Lake|date=1987-05-24
 06.01|00:30:41.306|00:35:47.445|baseball
 06.02|00:35:49.280|00:37:11.663|grilling
 06.03|00:37:11.830|00:37:35.520|exterior
@@ -44,18 +44,18 @@
 
 08|01:11:17.273|01:17:47.263|dance in driveway
 
-09|01:17:55.471|01:24:05.807|karate presentation|1987-06-08
+09|01:17:55.471|01:24:05.807|karate presentation|date=1987-06-08
 
-10|||Raisanen Family Gathering|1987-06-20
+10  |Raisanen Family Gathering|date=1987-06-20
 10.1|01:24:08.210|01:24:38.807|family in kitchen
 10.2|01:24:38.874|01:26:14.302|kids inside
 10.3|01:26:14.336|01:28:07.415|kids outside
 10.4|01:28:07.449|01:36:10.231|family inside
 
-11|||At Stenman Farm|1987-06-21
+11  |At Stenman Farm|date=1987-06-21
 11.1|01:36:12.667|01:39:04.705|at Stenman farm inside
 11.2|01:39:04.772|01:43:49.423|at Stenman farm outside
 
 12|01:43:49.523|01:55:09.803|extended family at table
 
-13|01:55:12.339||dance recital
+13|01:55:12.339|dance recital

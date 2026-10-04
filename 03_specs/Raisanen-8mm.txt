@@ -1,9 +1,9 @@
-# run using: ./process_tape.sh Raisanen-8mm 8mm
+# run using: ./process_tape.sh -8 Raisanen-8mm
 
-## Crop: 30|6|18|8
+GLOBAL_CROP = 30 6 18 8
 
 # REEL ONE
-01|00:00:08.108|00:12:33.319|BWCA||26|10|8|8
+01|00:00:08.108|00:12:33.319|BWCA| crop= 26 10 8 8
 
 # REEL TWO
 02|00:12:55.241|00:13:32.278|kids playing

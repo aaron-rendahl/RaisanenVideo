@@ -1,12 +1,13 @@
-## Crop: 12|24|0|8
+GLOBAL_CROP = 12 24 0 8
+GLOBAL_DATE = 1987-09-19
 
-|||Willy’s 40th Birthday Party|1987-09-19
-01|00:00:01.168||arrival
-02|00:02:12.366||kids dance
-03|00:04:41.548||social time and presents
-04|00:22:24.143||singer
-05|00:25:50.000||kids dance
-06|00:28:48.827||cake
-07|00:31:13.071||social time
-08|00:31:45.303||kids in driveway
-09|00:31:57.783||afterwards
+Willy’s 40th Birthday Party
+01|00:00:01.168|arrival
+02|00:02:12.366|kids dance
+03|00:04:41.548|social time and presents
+04|00:22:24.143|singer
+05|00:25:50.000|kids dance
+06|00:28:48.827|cake
+07|00:31:13.071|social time
+08|00:31:45.303|kids in driveway
+09|00:31:57.783|afterwards

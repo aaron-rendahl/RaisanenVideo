@@ -1,11 +1,12 @@
-## Crop: 10 12 0 8
+GLOBAL CROP = 10 12 0 8
+GLOBAL_DATE = 1999-06-20
 
-|||You Can’t Take It With You|1999-06-20
-01|00:00:00||Act I, Scene 1
-02|00:06:15||Smoke Alarm!
-03|00:08:55||Play continues...
-04|00:35:32.497||Act I, Scene 2
-05|00:49:39.009||Act II
-06|01:39:47.557||Act III
-07|02:12:32.467||Curtain Call
-08|02:15:06.703||Credits and Photos
+You Can’t Take It With You
+01|00:00:00|Act I, Scene 1
+02|00:06:15|Smoke Alarm!
+03|00:08:55|Play continues...
+04|00:35:32.497|Act I, Scene 2
+05|00:49:39.009|Act II
+06|01:39:47.557|Act III
+07|02:12:32.467|Curtain Call
+08|02:15:06.703|Credits and Photos
