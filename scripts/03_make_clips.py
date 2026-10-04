@@ -286,6 +286,7 @@ def main():
         for clip in data.clips:
             clip_start_time = time.perf_counter()
             segments = resolve_subsegments(clip, total_duration_sec)
+
             safe_title = (
                 "".join(
                     c if c.isalnum() or c in (" ", "-", "_") else ""
@@ -321,16 +322,17 @@ def main():
                 )
                 continue
 
-            output_mp4 = (
-                (
-                    tape_log_dir
-                    / f"{cfg.tape_name}_{clip.idx}_{safe_title}_test.mp4"
-                )
-                if cfg.do_test
-                else (
-                    tape_output_dir
-                    / f"{cfg.tape_name}_{clip.idx}_{safe_title}.mp4"
-                )
+              # 1. Determine base file stem
+              if len(tape.clips) == 1:
+                  base_stem = cfg.tape_name
+              else:
+                  base_stem = f"{cfg.tape_name}_{clip.idx}_{safe_title}"
+              
+              # 2. Resolve output directory and filename based on test mode
+              if cfg.do_test:
+                  output_mp4 = tape_log_dir / f"{base_stem}_test.mp4"
+              else:
+                  output_mp4 = tape_output_dir / f"{base_stem}.mp4"
             )
             meta_file_path = tape_log_dir / f"meta_{clip.idx}.txt"
             vtt_file_path = tape_log_dir / f"meta_{clip.idx}.vtt"
