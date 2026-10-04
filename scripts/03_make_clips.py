@@ -47,6 +47,8 @@ import shutil
 import shlex
 import tempfile
 import subprocess
+import os
+import re
 from pathlib import Path
 
 # Project Paths
@@ -169,66 +171,106 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
 
     return "\n".join(lines) + "\n"
 
+def convert_ffmetadata_to_vtt(meta_path: str) -> str:
+    """Parses ;FFMETADATA1 text file and converts [CHAPTER] entries into WebVTT format."""
+    chapters = []
+    start, end, title = None, None, ""
 
-def format_multiline_pipeline(cmd_stage1_pre, filter_lines, output_pipe_args, cmd_stage2, is_complex: bool, clip_id: str) -> str:
-    """
-    Formats Stage 1 and Stage 2 as sequential commands using a temporary intermediate 
-    lossless file to ensure macOS QuickLook previews render properly in Finder.
-    Includes a bash trap for automatic cleanup.
-    """
+    with open(meta_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("START="):
+                start = int(line.split("=")[1]) / 1000.0
+            elif line.startswith("END="):
+                end = int(line.split("=")[1]) / 1000.0
+            elif line.startswith("title="):
+                title = line.split("=", 1)[1]
+            elif line == "[CHAPTER]":
+                if start is not None and end is not None:
+                    chapters.append((start, end, title or "Chapter"))
+                start, end, title = None, None, ""
+
+    if start is not None and end is not None:
+        chapters.append((start, end, title or "Chapter"))
+
+    def fmt_time(s):
+        h = int(s // 3600)
+        m = int((s % 3600) // 60)
+        sec = s % 60
+        return f"{h:02d}:{m:02d}:{sec:06.3f}"
+
+    vtt_lines = ["WEBVTT\n"]
+    for idx, (st, en, ti) in enumerate(chapters, 1):
+        vtt_lines.append(f"{idx}\n{fmt_time(st)} --> {fmt_time(en)}\n{ti}\n")
+
+    return "\n".join(vtt_lines)
+
+
+def format_multiline_pipeline(
+    cmd_stage1_pre,
+    filter_lines,
+    output_pipe_args,
+    cmd_stage2,
+    is_complex: bool,
+    clip_id: str = "temp",
+) -> str:
     out_lines = []
-    
-    # 1. Setup temporary file path and trap cleanup
+
+    # 1. Paths & Setup
     tmp_file = f"/tmp/stage1_{clip_id}.mkv"
-    out_lines.append(f"TMP_FILE={shlex.quote(tmp_file)}")
-    out_lines.append("trap 'rm -f \"$TMP_FILE\"' EXIT\n")
-    
-    # 2. Stage 1: Decode, Deinterlace, Crop, and save Lossless (Ut Video / PCM)
-    out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
-    
-    i = 0
-    while i < len(cmd_stage1_pre):
-        arg = cmd_stage1_pre[i]
-        if arg == "-ss" and i + 5 < len(cmd_stage1_pre):
-            s_val = cmd_stage1_pre[i+1]
-            to_arg = cmd_stage1_pre[i+2]
-            to_val = cmd_stage1_pre[i+3]
-            i_arg = cmd_stage1_pre[i+4]
-            i_val = cmd_stage1_pre[i+5]
-            out_lines.append(f"  {arg} {s_val} {to_arg} {to_val} {i_arg} {shlex.quote(i_val)} \\")
-            i += 6
-        else:
-            i += 1
-
-    if is_complex:
-        out_lines.append("  -filter_complex \"\\")
-        for idx, line in enumerate(filter_lines):
-            if idx < len(filter_lines) - 1:
-                out_lines.append(f"    {line}; \\")
-            else:
-                out_lines.append(f"    {line}\" \\")
-        out_lines.append("  -map \"[outv]\" -map \"[outa]\" -c:v utvideo -c:a pcm_s16le \"$TMP_FILE\"\n")
-    else:
-        vf_idx = output_pipe_args.index("-vf") if "-vf" in output_pipe_args else -1
-        vf_str = output_pipe_args[vf_idx + 1] if vf_idx != -1 else ""
-        out_lines.append(f"  -vf {shlex.quote(vf_str)} -af \"asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000\" \\")
-        out_lines.append("  -c:v utvideo -c:a pcm_s16le \"$TMP_FILE\"\n")
-
-    # 3. Stage 2: Encode to MP4 using the intermediate file input
+    vtt_file = f"/tmp/stage1_{clip_id}.vtt"
     i_indices = [idx for idx, x in enumerate(cmd_stage2) if x == "-i"]
     meta_path = cmd_stage2[i_indices[1] + 1] if len(i_indices) > 1 else ""
     out_mp4_path = cmd_stage2[-1]
 
+    out_lines.append(f'TMP_FILE={shlex.quote(tmp_file)}')
+    out_lines.append(f'VTT_FILE={shlex.quote(vtt_file)}')
+    out_lines.append('trap \'rm -f "$TMP_FILE" "$VTT_FILE"\' EXIT\n')
+
+    # Write temporary VTT file for Stage 2
+    if meta_path and os.path.exists(meta_path):
+        vtt_content = convert_ffmetadata_to_vtt(meta_path)
+        with open(vtt_file, "w", encoding="utf-8") as f:
+            f.write(vtt_content)
+
+    # 2. Stage 1 Header & Inputs
+    out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
+
+    i = 0
+    while i < len(cmd_stage1_pre):
+        arg = cmd_stage1_pre[i]
+        if arg == "-ss" and i + 5 < len(cmd_stage1_pre):
+            s_val, to_val, i_val = cmd_stage1_pre[i+1], cmd_stage1_pre[i+3], cmd_stage1_pre[i+5]
+            out_lines.append(f"  -ss {s_val} -to {to_val} -i {shlex.quote(i_val)} \\")
+            i += 6
+        else:
+            i += 1
+
+    # 3. Stage 1 Filters & Lossless MKV Output
+    if is_complex:
+        out_lines.append('  -filter_complex "\\')
+        for idx, line in enumerate(filter_lines):
+            suffix = "; \\" if idx < len(filter_lines) - 1 else '" \\'
+            out_lines.append(f"    {line}{suffix}")
+        out_lines.append('  -map "[outv]" -map "[outa]" -c:v utvideo -c:a pcm_s16le "$TMP_FILE"\n')
+    else:
+        vf_idx = output_pipe_args.index("-vf") if "-vf" in output_pipe_args else -1
+        vf_str = output_pipe_args[vf_idx + 1] if vf_idx != -1 else ""
+        out_lines.append(f'  -vf {shlex.quote(vf_str)} -af "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000" \\')
+        out_lines.append('  -c:v utvideo -c:a pcm_s16le "$TMP_FILE"\n')
+
+    # 4. Stage 2 Encode (Injects ISO metadata + Native QuickTime Chapter Track)
     out_lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
-    out_lines.append(f"  -i \"$TMP_FILE\" -i {shlex.quote(meta_path)} \\")
-    out_lines.append("  -map 0:v -map 0:a -map_metadata 1 -map_chapters 1 -movflags +faststart \\")
+    out_lines.append(f'  -i "$TMP_FILE" -f ffmetadata -i {shlex.quote(meta_path)} -i "$VTT_FILE" \\')
+    out_lines.append("  -map 0:v:0 -map 0:a:0 -map 2:s:0 -map_metadata 1 -map_chapters 1 \\")
+    out_lines.append("  -movflags +faststart \\")
     out_lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
     out_lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
-    out_lines.append("  -c:a aac -b:a 192k -shortest \\")
+    out_lines.append("  -c:a aac -b:a 192k -c:s mov_text -shortest \\")
     out_lines.append(f"  {shlex.quote(out_mp4_path)}")
 
     return "\n".join(out_lines)
-
+  
 def clean_directory(dir_path: Path, do_uncropped: bool = False, do_cropped: bool = False, frames_mode: bool = False, test_mode: bool = False):
     """Targeted removal of PNG snapshots, test MP4s, and log files based on run mode."""
     if not dir_path.exists():
