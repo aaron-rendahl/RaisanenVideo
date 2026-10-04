@@ -298,40 +298,75 @@ def clean_directory(dir_path: Path, do_uncropped: bool = False, do_cropped: bool
             item.unlink()
 
 def format_pipeline_to_bash(stage1_cmd: list[str], stage2_cmd: list[str], tmp_mkv_path: str) -> str:
-    """Formats pre-built Stage 1 and Stage 2 command lists into a clean multiline bash script."""
+    """Formats pre-built Stage 1 and Stage 2 command lists into a clean multiline bash script using variables."""
     lines = []
-    lines.append(f'TMP_FILE={shlex.quote(tmp_mkv_path)}')
-    lines.append('trap \'rm -f "$TMP_FILE"\' EXIT\n')
 
-    # Format Stage 1
+    # Extract paths directly from the structured command arrays
+    i_idx = stage1_cmd.index("-i")
+    input_mkv = stage1_cmd[i_idx + 1]
+
+    i_indices = [idx for idx, arg in enumerate(stage2_cmd) if arg == "-i"]
+    meta_txt = stage2_cmd[i_indices[1] + 1]
+    chapters_vtt = stage2_cmd[i_indices[2] + 1]
+    output_mp4 = stage2_cmd[-1]
+
+    # 1. Path Declarations
+    lines.append(f'INPUT_MKV={shlex.quote(str(input_mkv))}')
+    lines.append(f'META_TXT={shlex.quote(str(meta_txt))}')
+    lines.append(f'CHAPTERS_VTT={shlex.quote(str(chapters_vtt))}')
+    lines.append(f'TMP_MKV={shlex.quote(str(tmp_mkv_path))}')
+    lines.append(f'OUTPUT_MP4={shlex.quote(str(output_mp4))}')
+    lines.append('trap \'rm -f "$TMP_MKV"\' EXIT\n')
+
+    # 2. Format Stage 1
     s1_quoted = [shlex.quote(arg) for arg in stage1_cmd]
-    lines.append(" ".join(s1_quoted[:7]) + " \\")
+    lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
+    
     i = 7
     while i < len(s1_quoted):
         if s1_quoted[i] == "-ss":
-            lines.append(f"  {' '.join(s1_quoted[i:i+6])} \\")
+            s_val, to_val = s1_quoted[i + 1], s1_quoted[i + 3]
+            lines.append(f"  -ss {s_val} -to {to_val} -i \"$INPUT_MKV\" \\")
             i += 6
+        elif s1_quoted[i] == "-filter_complex":
+            # Extract raw filter string (unquoted) from stage1_cmd array
+            fc_raw = stage1_cmd[i + 1]
+            filter_clauses = [clause.strip() for clause in fc_raw.split(";") if clause.strip()]
+            
+            lines.append('  -filter_complex "\\')
+            for idx, clause in enumerate(filter_clauses):
+                is_last = (idx == len(filter_clauses) - 1)
+                semi = "" if is_last else ";"
+                closing_quote = '" \\' if is_last else ' \\'
+                lines.append(f"    {clause}{semi}{closing_quote}")
+            
+            # Skip past -filter_complex <str> and process mapping/encoding args
+            i += 2
+            rest_args = " ".join(s1_quoted[i:-1])
+            lines.append(f"  {rest_args} \"$TMP_MKV\"")
+            break
         else:
-            lines.append(f"  {' '.join(s1_quoted[i:])}")
+            # Simple -vf / -af path
+            rest_args = " ".join(s1_quoted[i:-1])
+            lines.append(f"  {rest_args} \"$TMP_MKV\"")
             break
 
     lines.append("")  # Blank spacer
 
-    # Format Stage 2
-    s2_quoted = [shlex.quote(arg) for arg in stage2_cmd]
+    # 3. Format Stage 2
     lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
-    lines.append('  -channel_layout stereo -i "$TMP_FILE" \\')
-    lines.append(f'  -f ffmetadata -i {s2_quoted[12]} \\')
-    lines.append(f'  -i {s2_quoted[14]} \\')
+    lines.append('  -channel_layout stereo -i "$TMP_MKV" \\')
+    lines.append('  -f ffmetadata -i "$META_TXT" \\')
+    lines.append('  -i "$CHAPTERS_VTT" \\')
     lines.append("  -map 0:v:0 -map 0:a:0 -map 2:s:0 -map_metadata 1 -map_chapters 1 \\")
     lines.append("  -movflags +faststart \\")
     lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
     lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
     lines.append("  -c:a aac -b:a 192k -c:s mov_text -shortest \\")
-    lines.append(f'  {s2_quoted[-1]}')
+    lines.append('  "$OUTPUT_MP4"')
 
     return "\n".join(lines)
-
+  
 def main():
     if len(sys.argv) < 2:
         print("Usage: ./scripts/03_make_clips.py [--clean | --test | --uncropped-frames | --cropped-frames | --frames-only | --dry-run | --debug-scripts] <TAPE_NAME>")
@@ -514,8 +549,7 @@ def main():
                     script_filename = f"encode_{clip.idx}_{safe_title}.sh"
                     sub_script_path = tape_log_dir / script_filename
                     
-                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])
-                    
+                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])                  
                     script_body = [
                         "#!/usr/bin/env bash",
                         "set -e\n",
