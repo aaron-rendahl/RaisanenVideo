@@ -5,6 +5,7 @@ and sidecar metadata generation.
 """
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,7 +51,12 @@ def read_tape_spec(spec_text: str) -> TapeSpec:
 
     for line in spec_text.splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+
+        if line.startswith("#"):
+            if line.startswith("## Crop:"):
+                tape.global_crop = line.split(":", 1)[1].strip()
             continue
 
         if line.startswith("GLOBAL_CROP="):
@@ -59,25 +65,34 @@ def read_tape_spec(spec_text: str) -> TapeSpec:
 
         parts = [p.strip() for p in line.split("|")]
         if len(parts) >= 3:
+            # Subchapter entry: 01.1 | Start | End | Subchapter Title
             if "." in parts[0]:
                 if current_clip:
-                    sub_title = parts[1]
-                    s_time = parts[2]
-                    e_time = parts[3] if len(parts) > 3 else ""
+                    s_time = parts[1]
+                    e_time = parts[2]
+                    sub_title = parts[3] if len(parts) > 3 else ""
                     current_clip.subchapters.append((s_time, e_time, sub_title))
             else:
+                # Top-level Clip entry: Index | Start | End | Title | [Date/Crop]
                 idx = parts[0]
-                title = parts[1]
-                start = parts[2]
-                end = parts[3] if len(parts) > 3 else ""
-                crop = parts[4] if len(parts) > 4 else ""
+                start = parts[1]
+                end = parts[2]
+                title = parts[3] if len(parts) > 3 else f"Clip {idx}"
+
+                # Scan remaining fields for 4 space-separated crop integers
+                crop = ""
+                for extra in parts[4:]:
+                    sub_p = extra.split()
+                    if len(sub_p) == 4 and all(p.isdigit() for p in sub_p):
+                        crop = extra
+                        break
+
                 current_clip = ClipSpec(
                     idx=idx, title=title, start=start, end=end, crop=crop
                 )
                 tape.clips.append(current_clip)
 
     return tape
-
 
 def parse_timestamp_to_seconds(ts: str) -> float:
     """Converts HH:MM:SS.mmm or MM:SS.mmm string to total seconds."""
@@ -119,12 +134,12 @@ def resolve_subsegments(
     if clip.subchapters:
         for idx, (s_str, e_str, sub_title) in enumerate(clip.subchapters):
             s_sec = parse_timestamp_to_seconds(s_str)
-            if e_str:
+            # Guard against empty strings or non-numeric values in e_str
+            if e_str and any(c.isdigit() for c in e_str):
                 e_sec = parse_timestamp_to_seconds(e_str)
             elif idx + 1 < len(clip.subchapters):
-                e_sec = parse_timestamp_to_seconds(
-                    clip.subchapters[idx + 1][0]
-                )
+                # Look ahead to next subchapter's start time (element [0])
+                e_sec = parse_timestamp_to_seconds(clip.subchapters[idx + 1][0])
             else:
                 e_sec = (
                     parse_timestamp_to_seconds(clip.end)
