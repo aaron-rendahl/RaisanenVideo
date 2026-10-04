@@ -172,7 +172,7 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
     return "\n".join(lines) + "\n"
 
 def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
-    """Parses ;FFMETADATA1 text file and writes a co-located WebVTT file in the log folder."""
+    """Parses a ;FFMETADATA1 text file and writes a co-located WebVTT file."""
     if not os.path.exists(meta_path):
         return
 
@@ -196,7 +196,7 @@ def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
     if start is not None and end is not None:
         chapters.append((start, end, title or "Chapter"))
 
-    def fmt_time(s):
+    def fmt_time(s: float) -> str:
         h = int(s // 3600)
         m = int((s % 3600) // 60)
         sec = s % 60
@@ -209,71 +209,68 @@ def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
     with open(vtt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(vtt_lines))
 
+def build_clip_pipeline(
+    mkv_path: Path,
+    output_mp4: Path,
+    meta_file_path: Path,
+    vtt_file_path: Path,
+    segments: list,
+    vf_base: str,
+    is_gapped: bool,
+    do_test: bool,
+    clip_id: str,
+) -> dict:
+    """SINGLE SOURCE OF TRUTH: Builds the exact Stage 1 and Stage 2 command lists."""
+    tmp_mkv_path = f"/tmp/stage1_{clip_id}.mkv"
 
-def format_multiline_pipeline(
-    cmd_stage1_pre,
-    filter_lines,
-    output_pipe_args,
-    cmd_stage2,
-    is_complex: bool,
-    clip_id: str = "temp",
-) -> str:
-    out_lines = []
+    # --- Stage 1: Decode & Filter -> Lossless MKV ---
+    cmd_stage1 = [
+        "ffmpeg", "-nostdin", "-y", "-loglevel", "warning", "-fflags", "+genpts+discardcorrupt"
+    ]
+    for s_sec, e_sec, _ in segments:
+        cmd_stage1.extend(["-ss", str(s_sec)])
+        cmd_stage1.extend(["-to", str(min(e_sec, s_sec + 10.0) if do_test else e_sec)])
+        cmd_stage1.extend(["-i", str(mkv_path)])
 
-    # 1. Paths & Setup
-    tmp_file = f"/tmp/stage1_{clip_id}.mkv"
-    i_indices = [idx for idx, x in enumerate(cmd_stage2) if x == "-i"]
-    meta_path = cmd_stage2[i_indices[1] + 1] if len(i_indices) > 1 else ""
-    out_mp4_path = cmd_stage2[-1]
+    if is_gapped or len(segments) > 1:
+        filter_lines = []
+        for idx in range(len(segments)):
+            filter_lines.append(f"[{idx}:v]{vf_base}[v{idx}]")
+            filter_lines.append(f"[{idx}:a]asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000[a{idx}]")
+        concat_inputs = "".join(f"[v{idx}][a{idx}]" for idx in range(len(segments)))
+        filter_lines.append(f"{concat_inputs}concat=n={len(segments)}:v=1:a=1[outv][outa]")
 
-    # Co-locate VTT next to the ffmetadata text file in the log directory
-    vtt_path = meta_path.rsplit(".", 1)[0] + ".vtt" if meta_path else ""
-    if meta_path and vtt_path:
-        convert_ffmetadata_to_vtt(meta_path, vtt_path)
-
-    out_lines.append(f'TMP_FILE={shlex.quote(tmp_file)}')
-    out_lines.append('trap \'rm -f "$TMP_FILE"\' EXIT\n')
-
-    # 2. Stage 1 Header & Inputs
-    out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
-
-    i = 0
-    while i < len(cmd_stage1_pre):
-        arg = cmd_stage1_pre[i]
-        if arg == "-ss" and i + 5 < len(cmd_stage1_pre):
-            s_val, to_val, i_val = cmd_stage1_pre[i+1], cmd_stage1_pre[i+3], cmd_stage1_pre[i+5]
-            out_lines.append(f"  -ss {s_val} -to {to_val} -i {shlex.quote(i_val)} \\")
-            i += 6
-        else:
-            i += 1
-
-    # 3. Stage 1 Filters & Intermediate Lossless Output
-    if is_complex:
-        out_lines.append('  -filter_complex "\\')
-        for idx, line in enumerate(filter_lines):
-            suffix = "; \\" if idx < len(filter_lines) - 1 else '" \\'
-            out_lines.append(f"    {line}{suffix}")
-        out_lines.append('  -map "[outv]" -map "[outa]" -c:v utvideo -c:a pcm_s16le "$TMP_FILE"\n')
+        cmd_stage1.extend(["-filter_complex", ";".join(filter_lines), "-map", "[outv]", "-map", "[outa]"])
     else:
-        vf_idx = output_pipe_args.index("-vf") if "-vf" in output_pipe_args else -1
-        vf_str = output_pipe_args[vf_idx + 1] if vf_idx != -1 else ""
-        out_lines.append(f'  -vf {shlex.quote(vf_str)} -af "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000" \\')
-        out_lines.append('  -c:v utvideo -c:a pcm_s16le "$TMP_FILE"\n')
+        cmd_stage1.extend(["-vf", vf_base, "-af", "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000"])
 
-    # 4. Stage 2 Encode
-    out_lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
-    out_lines.append('  -channel_layout stereo -i "$TMP_FILE" \\')
-    out_lines.append(f'  -f ffmetadata -i {shlex.quote(meta_path)} \\')
-    out_lines.append(f'  -i {shlex.quote(vtt_path)} \\')
-    out_lines.append("  -map 0:v:0 -map 0:a:0 -map 2:s:0 -map_metadata 1 -map_chapters 1 \\")
-    out_lines.append("  -movflags +faststart \\")
-    out_lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
-    out_lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
-    out_lines.append("  -c:a aac -b:a 192k -c:s mov_text -shortest \\")
-    out_lines.append(f"  {shlex.quote(out_mp4_path)}")
+    cmd_stage1.extend(["-c:v", "utvideo", "-c:a", "pcm_s16le", tmp_mkv_path])
 
-    return "\n".join(out_lines)
-  
+    # --- Stage 2: Lossless MKV -> Delivery MP4 with Dual Chapters ---
+    cmd_stage2 = [
+        "ffmpeg", "-nostdin", "-y", "-loglevel", "warning",
+        "-analyzeduration", "10M", "-probesize", "10M",
+        "-channel_layout", "stereo", "-i", tmp_mkv_path,
+        "-f", "ffmetadata", "-i", str(meta_file_path),
+        "-i", str(vtt_file_path),
+        "-map", "0:v:0", "-map", "0:a:0", "-map", "2:s:0",
+        "-map_metadata", "1", "-map_chapters", "1",
+        "-movflags", "+faststart",
+        "-c:v", "libx264", "-crf", "22", "-preset", "slow",
+        "-force_key_frames", "expr:eq(n,0)", "-g", "60",
+        "-pix_fmt", "yuv420p", "-tag:v", "avc1",
+        "-color_primaries", "smpte170m", "-color_trc", "smpte170m", "-colorspace", "smpte170m",
+        "-c:a", "aac", "-b:a", "192k",
+        "-c:s", "mov_text", "-shortest",
+        str(output_mp4)
+    ]
+
+    return {
+        "tmp_mkv": tmp_mkv_path,
+        "stage1": cmd_stage1,
+        "stage2": cmd_stage2,
+    }
+    
 def clean_directory(dir_path: Path, do_uncropped: bool = False, do_cropped: bool = False, frames_mode: bool = False, test_mode: bool = False):
     """Targeted removal of PNG snapshots, test MP4s, and log files based on run mode."""
     if not dir_path.exists():
@@ -300,6 +297,40 @@ def clean_directory(dir_path: Path, do_uncropped: bool = False, do_cropped: bool
         if do_cropped and name.endswith("b.png"):
             item.unlink()
 
+def format_pipeline_to_bash(stage1_cmd: list[str], stage2_cmd: list[str], tmp_mkv_path: str) -> str:
+    """Formats pre-built Stage 1 and Stage 2 command lists into a clean multiline bash script."""
+    lines = []
+    lines.append(f'TMP_FILE={shlex.quote(tmp_mkv_path)}')
+    lines.append('trap \'rm -f "$TMP_FILE"\' EXIT\n')
+
+    # Format Stage 1
+    s1_quoted = [shlex.quote(arg) for arg in stage1_cmd]
+    lines.append(" ".join(s1_quoted[:7]) + " \\")
+    i = 7
+    while i < len(s1_quoted):
+        if s1_quoted[i] == "-ss":
+            lines.append(f"  {' '.join(s1_quoted[i:i+6])} \\")
+            i += 6
+        else:
+            lines.append(f"  {' '.join(s1_quoted[i:])}")
+            break
+
+    lines.append("")  # Blank spacer
+
+    # Format Stage 2
+    s2_quoted = [shlex.quote(arg) for arg in stage2_cmd]
+    lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
+    lines.append('  -channel_layout stereo -i "$TMP_FILE" \\')
+    lines.append(f'  -f ffmetadata -i {s2_quoted[12]} \\')
+    lines.append(f'  -i {s2_quoted[14]} \\')
+    lines.append("  -map 0:v:0 -map 0:a:0 -map 2:s:0 -map_metadata 1 -map_chapters 1 \\")
+    lines.append("  -movflags +faststart \\")
+    lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
+    lines.append("  -pix_fmt yuv420p -tag:v avc1 -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\")
+    lines.append("  -c:a aac -b:a 192k -c:s mov_text -shortest \\")
+    lines.append(f'  {s2_quoted[-1]}')
+
+    return "\n".join(lines)
 
 def main():
     if len(sys.argv) < 2:
@@ -356,7 +387,7 @@ def main():
     data.resolve_missing_end_times(total_duration_str)
     total_duration_sec = parse_timestamp_to_seconds(total_duration_str)
 
-    # Clean up previous target images/test clips without affecting preserved counterparts
+    # Clean up previous target images/test clips
     clean_directory(tape_log_dir, do_uncropped, do_cropped, frames_mode, do_test)
 
     log_file_path = tape_log_dir / "ffmpeg_encode.log"
@@ -392,25 +423,21 @@ def main():
             safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title).strip().replace(" ", "_")
             clip_prefix = f"{tape_name}_{clip.idx}_{safe_title}"
 
-            # Crop Geometry (Left Right Top Bottom)
+            # Crop Geometry
             crop_val = clip.crop if clip.crop else data.global_crop
             ffmpeg_crop = build_crop_filter(crop_val)
 
+            # Diagnostic frames handling
             if frames_mode:
                 print(f"[{clip.idx}] Capturing diagnostic frames for: {clip.title}...", end="", flush=True)
-                
-                # Iterate over every subchapter segment
                 for sub_idx, (s_sec, e_sec, sub_title) in enumerate(segments, start=1):
                     mid_sec = s_sec + ((e_sec - s_sec) / 2.0)
                     end_sec = max(s_sec, e_sec - 0.1)
-
-                    # Subchapter positions: 1=start, 2=mid, 3=end
                     timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
                     
                     for pos_code, t_sec in timestamps:
                         snapshot_prefix = f"{clip_prefix}_{sub_idx}-{pos_code}"
                         
-                        # Uncropped snapshot (a)
                         if do_uncropped:
                             uncropped_out = tape_log_dir / f"{snapshot_prefix}a.png"
                             cmd_uncropped = [
@@ -426,22 +453,20 @@ def main():
                             else:
                                 subprocess.run(cmd_uncropped, stdout=log_file, stderr=log_file, check=True)
 
-                        # Cropped snapshot (b)
-                        if do_cropped:
-                            if ffmpeg_crop:
-                                cropped_out = tape_log_dir / f"{snapshot_prefix}b.png"
-                                cmd_cropped = [
-                                    "ffmpeg", "-y", "-loglevel", "warning",
-                                    "-ss", str(t_sec), "-i", str(mkv_path),
-                                    "-vf", f"{ffmpeg_crop},format=rgb24",
-                                    "-vframes", "1", "-update", "1",
-                                    str(cropped_out)
-                                ]
-                                if do_dry_run or do_split_scripts:
-                                    single_script_lines.append(f"# [{clip.idx}] Cropped Snapshot")
-                                    single_script_lines.append(" ".join(shlex.quote(c) for c in cmd_cropped) + "\n")
-                                else:
-                                    subprocess.run(cmd_cropped, stdout=log_file, stderr=log_file, check=True)
+                        if do_cropped and ffmpeg_crop:
+                            cropped_out = tape_log_dir / f"{snapshot_prefix}b.png"
+                            cmd_cropped = [
+                                "ffmpeg", "-y", "-loglevel", "warning",
+                                "-ss", str(t_sec), "-i", str(mkv_path),
+                                "-vf", f"{ffmpeg_crop},format=rgb24",
+                                "-vframes", "1", "-update", "1",
+                                str(cropped_out)
+                            ]
+                            if do_dry_run or do_split_scripts:
+                                single_script_lines.append(f"# [{clip.idx}] Cropped Snapshot")
+                                single_script_lines.append(" ".join(shlex.quote(c) for c in cmd_cropped) + "\n")
+                            else:
+                                subprocess.run(cmd_cropped, stdout=log_file, stderr=log_file, check=True)
                 
                 elapsed_str = format_elapsed_time(time.perf_counter() - clip_start_time)
                 print(f" Done ({elapsed_str})")
@@ -455,167 +480,98 @@ def main():
 
             is_gapped = has_gaps(segments)
 
-            # Video filter chain (bwdif + crop + PTS reset to zero)
+            # Video filter chain
             vf_base = "bwdif=mode=send_field:deint=all"
             if ffmpeg_crop:
                 vf_base += f",{ffmpeg_crop}"
             vf_base += ",setpts=PTS-STARTPTS"
 
-            # Build metadata content
+            # 1. Generate Sidecar Files in Log Folder
             ffmeta_content = generate_concat_ffmetadata(clip, segments, is_test=do_test)
+            meta_file_path = tape_log_dir / f"meta_{clip.idx}.txt"
+            vtt_file_path = tape_log_dir / f"meta_{clip.idx}.vtt"
             
-            if do_split_scripts:
-                meta_file_path = tape_log_dir / f"meta_{clip.idx}.txt"
-                meta_file_path.write_text(ffmeta_content)
-                meta_path = str(meta_file_path)
-            elif do_dry_run:
-                script_meta_path = tape_log_dir / f"meta_{clip.idx}.txt"
-                single_script_lines.append(f"# --- Clip [{clip.idx}]: {clip.title} ---")
-                single_script_lines.append(f"cat << 'EOF' > {shlex.quote(str(script_meta_path))}")
-                single_script_lines.append(ffmeta_content.strip())
-                single_script_lines.append("EOF\n")
-                meta_path = str(script_meta_path)
-            else:
-                with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as meta_file:
-                    meta_file.write(ffmeta_content)
-                    meta_path = meta_file.name
+            meta_file_path.write_text(ffmeta_content, encoding="utf-8")
+            convert_ffmetadata_to_vtt(str(meta_file_path), str(vtt_file_path))
+
+            # 2. Get Single Source of Truth Commands
+            pipe = build_clip_pipeline(
+                mkv_path=mkv_path,
+                output_mp4=output_mp4,
+                meta_file_path=meta_file_path,
+                vtt_file_path=vtt_file_path,
+                segments=segments,
+                vf_base=vf_base,
+                is_gapped=is_gapped,
+                do_test=do_test,
+                clip_id=str(clip.idx),
+            )
 
             try:
-                # Stage 1 command setup
-                cmd_stage1_pre = ["ffmpeg", "-nostdin", "-y", "-loglevel", "warning", "-fflags", "+genpts+discardcorrupt"]
-                
-                for s_sec, e_sec, _ in segments:
-                    cmd_stage1_pre.extend(["-ss", str(s_sec)])
-                    if do_test:
-                        cmd_stage1_pre.extend(["-to", str(min(e_sec, s_sec + 10.0))])
-                    else:
-                        cmd_stage1_pre.extend(["-to", str(e_sec)])
-                    cmd_stage1_pre.extend(["-i", str(mkv_path)])
-
-                filter_lines = []
-                if is_gapped or len(segments) > 1:
-                    for idx in range(len(segments)):
-                        filter_lines.append(f"[{idx}:v]{vf_base}[v{idx}]")
-                        filter_lines.append(f"[{idx}:a]asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000[a{idx}]")
-                    
-                    concat_inputs = "".join(f"[v{idx}][a{idx}]" for idx in range(len(segments)))
-                    filter_lines.append(f"{concat_inputs}concat=n={len(segments)}:v=1:a=1[outv][outa]")
-                    
-                    output_pipe_args = [
-                        "-map", "[outv]",
-                        "-map", "[outa]",
-                        "-c:v", "rawvideo", "-pix_fmt", "yuv420p",
-                        "-f", "nut", "pipe:1"
-                    ]
-                    is_complex = True
-                else:
-                    output_pipe_args = [
-                        "-vf", vf_base,
-                        "-af", "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000",
-                        "-c:v", "rawvideo", "-pix_fmt", "yuv420p",
-                        "-f", "nut", "pipe:1"
-                    ]
-                    is_complex = False
-
-                cmd_stage1 = list(cmd_stage1_pre)
-                if is_complex:
-                    cmd_stage1.extend(["-filter_complex", ";".join(filter_lines)])
-                cmd_stage1.extend(output_pipe_args)
-
-                # Stage 2: Ingest nut pipe -> x264 encode + Apple tags + chapter metadata
-                cmd_stage2 = [
-                    "ffmpeg", "-nostdin", "-y", "-loglevel", "warning",
-                    "-analyzeduration", "10M", "-probesize", "10M",
-                    "-f", "nut", "-i", "pipe:0",
-                    "-i", str(meta_path),
-                    "-map", "0:v",
-                    "-map", "0:a",
-                    "-map_metadata", "1",
-                    "-map_chapters", "1",
-                    "-movflags", "+faststart",
-                    "-c:v", "libx264", "-crf", "22", "-preset", "slow",
-                    "-force_key_frames", "expr:eq(n,0)", "-g", "60",
-                    "-pix_fmt", "yuv420p", "-tag:v", "avc1",
-                    "-color_primaries", "smpte170m", "-color_trc", "smpte170m", "-colorspace", "smpte170m",
-                    "-c:a", "aac", "-b:a", "192k",
-                    "-shortest",
-                    str(output_mp4)
-                ]
-
+                # 3. Handle Execution Path
                 if do_split_scripts:
                     print(f"[{clip.idx}] Writing multi-line debug script for: {clip.title}...", end="", flush=True)
-                    
                     script_filename = f"encode_{clip.idx}_{safe_title}.sh"
                     sub_script_path = tape_log_dir / script_filename
                     
-                    multiline_cmd = format_multiline_pipeline(
-                        cmd_stage1_pre,
-                        filter_lines,
-                        output_pipe_args,
-                        cmd_stage2,
-                        is_complex,
-                        clip_id=str(getattr(clip, "id", getattr(clip, "num", "temp"))),
-                    )         
+                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])
                     
                     script_body = [
                         "#!/usr/bin/env bash",
                         "set -e\n",
                         f"# Clip [{clip.idx}]: {clip.title}",
-                        f"# Metadata: {meta_path}",
+                        f"# Metadata: {meta_file_path}",
+                        f"# VTT:      {vtt_file_path}",
                         f"# Output:   {output_mp4}\n",
                         multiline_cmd + "\n"
                     ]
                     
-                    sub_script_path.write_text("\n".join(script_body))
+                    sub_script_path.write_text("\n".join(script_body), encoding="utf-8")
                     sub_script_path.chmod(0o755)
                     run_all_lines.append(f"./{script_filename}")
 
                 elif do_dry_run:
-                    str_cmd1 = " ".join(shlex.quote(c) for c in cmd_stage1)
-                    str_cmd2 = " ".join(shlex.quote(c) for c in cmd_stage2)
-                    single_script_lines.append(f"{str_cmd1} \\\n  | {str_cmd2}\n")
+                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])
+                    single_script_lines.append(f"# --- Clip [{clip.idx}]: {clip.title} ---")
+                    single_script_lines.append(multiline_cmd + "\n")
+
                 else:
-                    print(f"[{clip.idx}] Encoding {'TEST ' if do_test else ''}clip (two-stage pipe): {clip.title}...", end="", flush=True)
+                    # Live Execution (Direct Python Subprocess)
+                    print(f"[{clip.idx}] Encoding {'TEST ' if do_test else ''}clip: {clip.title}...", end="", flush=True)
                     log_file.write(f"\n--- Encoding Clip [{clip.idx}]: {clip.title} {'(TEST)' if do_test else ''} ---\n")
                     log_file.flush()
 
-                    # Execute Stage 1 and Stage 2 connected via stdout/stdin pipe
-                    p1 = subprocess.Popen(cmd_stage1, stdout=subprocess.PIPE, stderr=log_file)
-                    p2 = subprocess.Popen(cmd_stage2, stdin=p1.stdout, stdout=log_file, stderr=log_file)
+                    # Execute Stage 1
+                    subprocess.run(pipe["stage1"], stdout=log_file, stderr=log_file, check=True)
                     
-                    # Allow p1 to receive a SIGPIPE if p2 exits early
-                    p1.stdout.close()
-                    p2.communicate()
-
-                    if p2.returncode != 0:
-                        raise subprocess.CalledProcessError(p2.returncode, cmd_stage2)
+                    # Execute Stage 2
+                    subprocess.run(pipe["stage2"], stdout=log_file, stderr=log_file, check=True)
 
                 elapsed_str = format_elapsed_time(time.perf_counter() - clip_start_time)
                 print(f" Done ({elapsed_str})")
                 if not do_dry_run and not do_split_scripts:
                     log_file.write(f"Completed in {elapsed_str}\n")
+
             finally:
-                if not do_dry_run and not do_split_scripts:
-                    Path(meta_path).unlink(missing_ok=True)
+                # Always clean up intermediate lossless MKV
+                if os.path.exists(pipe["tmp_mkv"]):
+                    os.remove(pipe["tmp_mkv"])
 
     if do_split_scripts:
         master_runner_path = tape_log_dir / "run_all.sh"
-        master_runner_path.write_text("\n".join(run_all_lines) + "\n")
+        master_runner_path.write_text("\n".join(run_all_lines) + "\n", encoding="utf-8")
         master_runner_path.chmod(0o755)
         print(f"\nGenerated individual multi-line scripts & master runner in: {tape_log_dir}")
-        print(f"Run a single clip script directly:  {tape_log_dir}/encode_03_Joe_and_Willy_Karate.sh")
         print(f"Or run all scripts sequentially:     {master_runner_path}")
 
     elif do_dry_run:
         script_out_path = tape_log_dir / "run_encode.sh"
-        script_out_path.write_text("\n".join(single_script_lines))
+        script_out_path.write_text("\n".join(single_script_lines), encoding="utf-8")
         script_out_path.chmod(0o755)
         print(f"\nSaved executable bash script to: {script_out_path}")
-        print(f"Run it directly with:  {script_out_path}")
 
     total_elapsed_str = format_elapsed_time(time.perf_counter() - tape_start_time)
     print(f"\nAll operations complete for '{tape_name}' in {total_elapsed_str}!")
-
 
 if __name__ == "__main__":
     main()
