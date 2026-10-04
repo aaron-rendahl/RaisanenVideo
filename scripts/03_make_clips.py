@@ -367,54 +367,150 @@ def format_pipeline_to_bash(stage1_cmd: list[str], stage2_cmd: list[str], tmp_mk
 
     return "\n".join(lines)
   
-def main():
-    if len(sys.argv) < 2:
+from dataclasses import dataclass
+
+@dataclass
+class CLIConfig:
+    tape_name: str
+    do_clean: bool = False
+    do_test: bool = False
+    do_dry_run: bool = False
+    do_split_scripts: bool = False
+    do_uncropped: bool = False
+    do_cropped: bool = False
+
+    @property
+    def frames_mode(self) -> bool:
+        return self.do_uncropped or self.do_cropped
+
+def parse_cli_args(argv: list[str]) -> CLIConfig:
+    if len(argv) < 2:
         print("Usage: ./scripts/03_make_clips.py [--clean | --test | --uncropped-frames | --cropped-frames | --frames-only | --dry-run | --debug-scripts] <TAPE_NAME>")
         sys.exit(1)
 
-    do_clean = "--clean" in sys.argv or "--clean-log" in sys.argv
-    do_test = "--test" in sys.argv or "--test-clips" in sys.argv
-    do_dry_run = "--dry-run" in sys.argv or "--script" in sys.argv
-    do_split_scripts = "--debug-scripts" in sys.argv or "--split-scripts" in sys.argv
-    do_uncropped = "--uncropped-frames" in sys.argv or "--frames-only" in sys.argv
-    do_cropped = "--cropped-frames" in sys.argv or "--frames-only" in sys.argv
-    frames_mode = do_uncropped or do_cropped
-
-    tape_args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
-
+    tape_args = [arg for arg in argv[1:] if not arg.startswith("--")]
     if not tape_args:
         print("Error: Missing tape name argument.")
         sys.exit(1)
 
-    tape_name = Path(tape_args[0]).stem
+    return CLIConfig(
+        tape_name=Path(tape_args[0]).stem,
+        do_clean="--clean" in argv or "--clean-log" in argv,
+        do_test="--test" in argv or "--test-clips" in argv,
+        do_dry_run="--dry-run" in argv or "--script" in argv,
+        do_split_scripts="--debug-scripts" in argv or "--split-scripts" in argv,
+        do_uncropped="--uncropped-frames" in argv or "--frames-only" in argv,
+        do_cropped="--cropped-frames" in argv or "--frames-only" in argv,
+    )
+
+def capture_diagnostic_frames(
+    clip,
+    segments: list,
+    mkv_path: Path,
+    tape_log_dir: Path,
+    ffmpeg_crop: str,
+    cfg: CLIConfig,
+    log_file,
+    single_script_lines: list[str],
+) -> None:
+    """Captures uncropped ('a') and cropped ('b') diagnostic frame snapshots."""
+    safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title).strip().replace(" ", "_")
+    clip_prefix = f"{tape_log_dir.name.replace('-log', '')}_{clip.idx}_{safe_title}"
+
+    for sub_idx, (s_sec, e_sec, _) in enumerate(segments, start=1):
+        mid_sec = s_sec + ((e_sec - s_sec) / 2.0)
+        end_sec = max(s_sec, e_sec - 0.1)
+        timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
+
+        for pos_code, t_sec in timestamps:
+            snapshot_prefix = f"{clip_prefix}_{sub_idx}-{pos_code}"
+
+            if cfg.do_uncropped:
+                out_png = tape_log_dir / f"{snapshot_prefix}a.png"
+                cmd = [
+                    "ffmpeg", "-y", "-loglevel", "warning",
+                    "-ss", str(t_sec), "-i", str(mkv_path),
+                    "-vf", "format=rgb24", "-vframes", "1", "-update", "1", str(out_png)
+                ]
+                if cfg.do_dry_run or cfg.do_split_scripts:
+                    single_script_lines.append(" ".join(shlex.quote(c) for c in cmd) + "\n")
+                else:
+                    subprocess.run(cmd, stdout=log_file, stderr=log_file, check=True)
+
+            if cfg.do_cropped and ffmpeg_crop:
+                out_png = tape_log_dir / f"{snapshot_prefix}b.png"
+                cmd = [
+                    "ffmpeg", "-y", "-loglevel", "warning",
+                    "-ss", str(t_sec), "-i", str(mkv_path),
+                    "-vf", f"{ffmpeg_crop},format=rgb24", "-vframes", "1", "-update", "1", str(out_png)
+                ]
+                if cfg.do_dry_run or cfg.do_split_scripts:
+                    single_script_lines.append(" ".join(shlex.quote(c) for c in cmd) + "\n")
+                else:
+                    subprocess.run(cmd, stdout=log_file, stderr=log_file, check=True)
+
+def process_clip_pipeline(
+    clip,
+    pipe: dict,
+    cfg: CLIConfig,
+    tape_log_dir: Path,
+    safe_title: str,
+    log_file,
+    run_all_lines: list[str],
+    single_script_lines: list[str],
+) -> None:
+    """Dispatches the pre-built pipeline to script generation or direct execution."""
+    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])
+
+    if cfg.do_split_scripts:
+        print(f"[{clip.idx}] Writing multi-line debug script for: {clip.title}...", end="", flush=True)
+        script_filename = f"encode_{clip.idx}_{safe_title}.sh"
+        sub_script_path = tape_log_dir / script_filename
+
+        script_body = [
+            "#!/usr/bin/env bash",
+            "set -e\n",
+            f"# Clip [{clip.idx}]: {clip.title}",
+            multiline_cmd + "\n"
+        ]
+        sub_script_path.write_text("\n".join(script_body), encoding="utf-8")
+        sub_script_path.chmod(0o755)
+        run_all_lines.append(f"./{script_filename}")
+
+    elif cfg.do_dry_run:
+        single_script_lines.append(f"# --- Clip [{clip.idx}]: {clip.title} ---")
+        single_script_lines.append(multiline_cmd + "\n")
+
+    else:
+        print(f"[{clip.idx}] Encoding {'TEST ' if cfg.do_test else ''}clip: {clip.title}...", end="", flush=True)
+        log_file.write(f"\n--- Encoding Clip [{clip.idx}]: {clip.title} ---\n")
+        log_file.flush()
+
+        subprocess.run(pipe["stage1"], stdout=log_file, stderr=log_file, check=True)
+        subprocess.run(pipe["stage2"], stdout=log_file, stderr=log_file, check=True)
+
+def main():
+    cfg = parse_cli_args(sys.argv)
 
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Directory setup
-    tape_output_dir = CLIPS_DIR / tape_name
-    tape_log_dir = CLIPS_DIR / f"{tape_name}-log"
+    tape_output_dir = CLIPS_DIR / cfg.tape_name
+    tape_log_dir = CLIPS_DIR / f"{cfg.tape_name}-log"
 
-    # Handle --clean / --clean-log flag
-    if do_clean:
+    if cfg.do_clean:
         if tape_log_dir.exists():
             print(f"Removing diagnostic log directory: {tape_log_dir}")
             shutil.rmtree(tape_log_dir)
             print("Clean complete!")
-        else:
-            print(f"Diagnostic directory '{tape_log_dir}' does not exist. Nothing to clean.")
         sys.exit(0)
 
     tape_output_dir.mkdir(exist_ok=True)
     tape_log_dir.mkdir(exist_ok=True)
 
-    spec_path = SPECS_DIR / f"{tape_name}.txt"
-    mkv_path = ARCHIVE_DIR / f"{tape_name}.mkv"
+    spec_path = SPECS_DIR / f"{cfg.tape_name}.txt"
+    mkv_path = ARCHIVE_DIR / f"{cfg.tape_name}.mkv"
 
-    if not spec_path.exists():
-        print(f"Error: Spec file not found at '{spec_path}'")
-        sys.exit(1)
-    if not mkv_path.exists():
-        print(f"Error: Archival version not found at '{mkv_path}'")
+    if not spec_path.exists() or not mkv_path.exists():
+        print("Error: Spec file or archival MKV missing.")
         sys.exit(1)
 
     data = read_tape_spec(spec_path.read_text())
@@ -422,190 +518,65 @@ def main():
     data.resolve_missing_end_times(total_duration_str)
     total_duration_sec = parse_timestamp_to_seconds(total_duration_str)
 
-    # Clean up previous target images/test clips
-    clean_directory(tape_log_dir, do_uncropped, do_cropped, frames_mode, do_test)
+    clean_directory(tape_log_dir, cfg.do_uncropped, cfg.do_cropped, cfg.frames_mode, cfg.do_test)
 
     log_file_path = tape_log_dir / "ffmpeg_encode.log"
-
-    if do_split_scripts:
-        print(f"DEBUG SCRIPTS MODE: Generating multi-line bash scripts & meta text files in: {tape_log_dir}")
-    elif do_dry_run:
-        print(f"DRY RUN MODE: Generating executable bash script in: {tape_log_dir}")
-    elif do_test:
-        print(f"Generating 10-second TEST clips per subchapter in: {tape_log_dir}")
-    elif frames_mode:
-        mode_desc = []
-        if do_uncropped:
-            mode_desc.append("uncropped ('a')")
-        if do_cropped:
-            mode_desc.append("cropped ('b')")
-        print(f"Generating {' and '.join(mode_desc)} diagnostic frames for: {tape_name}")
-    else:
-        print(f"Encoding full clip MP4s for: {tape_name}")
-
-    print(f"Clips Directory:     {tape_output_dir}")
-    print(f"Diagnostics & Logs:  {tape_log_dir}\n")
-
     tape_start_time = time.perf_counter()
-    single_script_lines = ["#!/usr/bin/env bash", "set -e\n", f"# Generated by 03_make_clips.py for {tape_name}\n"]
-    run_all_lines = ["#!/usr/bin/env bash", "set -e\n", f"# Batch master runner for {tape_name}\n"]
+    single_script_lines = ["#!/usr/bin/env bash", "set -e\n"]
+    run_all_lines = ["#!/usr/bin/env bash", "set -e\n"]
 
     with open(log_file_path, "a", encoding="utf-8") as log_file:
         for clip in data.clips:
             clip_start_time = time.perf_counter()
             segments = resolve_subsegments(clip, total_duration_sec)
-            
             safe_title = "".join(c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title).strip().replace(" ", "_")
-            clip_prefix = f"{tape_name}_{clip.idx}_{safe_title}"
-
-            # Crop Geometry
+            
             crop_val = clip.crop if clip.crop else data.global_crop
             ffmpeg_crop = build_crop_filter(crop_val)
 
-            # Diagnostic frames handling
-            if frames_mode:
+            # 1. Handle Frame Capture Mode
+            if cfg.frames_mode:
                 print(f"[{clip.idx}] Capturing diagnostic frames for: {clip.title}...", end="", flush=True)
-                for sub_idx, (s_sec, e_sec, sub_title) in enumerate(segments, start=1):
-                    mid_sec = s_sec + ((e_sec - s_sec) / 2.0)
-                    end_sec = max(s_sec, e_sec - 0.1)
-                    timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
-                    
-                    for pos_code, t_sec in timestamps:
-                        snapshot_prefix = f"{clip_prefix}_{sub_idx}-{pos_code}"
-                        
-                        if do_uncropped:
-                            uncropped_out = tape_log_dir / f"{snapshot_prefix}a.png"
-                            cmd_uncropped = [
-                                "ffmpeg", "-y", "-loglevel", "warning",
-                                "-ss", str(t_sec), "-i", str(mkv_path),
-                                "-vf", "format=rgb24",
-                                "-vframes", "1", "-update", "1",
-                                str(uncropped_out)
-                            ]
-                            if do_dry_run or do_split_scripts:
-                                single_script_lines.append(f"# [{clip.idx}] Uncropped Snapshot")
-                                single_script_lines.append(" ".join(shlex.quote(c) for c in cmd_uncropped) + "\n")
-                            else:
-                                subprocess.run(cmd_uncropped, stdout=log_file, stderr=log_file, check=True)
-
-                        if do_cropped and ffmpeg_crop:
-                            cropped_out = tape_log_dir / f"{snapshot_prefix}b.png"
-                            cmd_cropped = [
-                                "ffmpeg", "-y", "-loglevel", "warning",
-                                "-ss", str(t_sec), "-i", str(mkv_path),
-                                "-vf", f"{ffmpeg_crop},format=rgb24",
-                                "-vframes", "1", "-update", "1",
-                                str(cropped_out)
-                            ]
-                            if do_dry_run or do_split_scripts:
-                                single_script_lines.append(f"# [{clip.idx}] Cropped Snapshot")
-                                single_script_lines.append(" ".join(shlex.quote(c) for c in cmd_cropped) + "\n")
-                            else:
-                                subprocess.run(cmd_cropped, stdout=log_file, stderr=log_file, check=True)
-                
-                elapsed_str = format_elapsed_time(time.perf_counter() - clip_start_time)
-                print(f" Done ({elapsed_str})")
+                capture_diagnostic_frames(clip, segments, mkv_path, tape_log_dir, ffmpeg_crop, cfg, log_file, single_script_lines)
+                print(f" Done ({format_elapsed_time(time.perf_counter() - clip_start_time)})")
                 continue
 
-            # Determine destination output file
-            if do_test:
-                output_mp4 = tape_log_dir / f"{clip_prefix}_test.mp4"
-            else:
-                output_mp4 = tape_output_dir / f"{clip_prefix}.mp4"
-
-            is_gapped = has_gaps(segments)
-
-            # Video filter chain
-            vf_base = "bwdif=mode=send_field:deint=all"
-            if ffmpeg_crop:
-                vf_base += f",{ffmpeg_crop}"
-            vf_base += ",setpts=PTS-STARTPTS"
-
-            # 1. Generate Sidecar Files in Log Folder
-            ffmeta_content = generate_concat_ffmetadata(clip, segments, is_test=do_test)
+            # 2. Sidecar Asset Setup
+            output_mp4 = (tape_log_dir / f"{cfg.tape_name}_{clip.idx}_{safe_title}_test.mp4") if cfg.do_test else (tape_output_dir / f"{cfg.tape_name}_{clip.idx}_{safe_title}.mp4")
             meta_file_path = tape_log_dir / f"meta_{clip.idx}.txt"
             vtt_file_path = tape_log_dir / f"meta_{clip.idx}.vtt"
-            
-            meta_file_path.write_text(ffmeta_content, encoding="utf-8")
+
+            meta_file_path.write_text(generate_concat_ffmetadata(clip, segments, is_test=cfg.do_test), encoding="utf-8")
             convert_ffmetadata_to_vtt(str(meta_file_path), str(vtt_file_path))
 
-            # 2. Get Single Source of Truth Commands
+            # 3. Construct Single Source of Truth Commands
+            vf_base = "bwdif=mode=send_field:deint=all" + (f",{ffmpeg_crop}" if ffmpeg_crop else "") + ",setpts=PTS-STARTPTS"
             pipe = build_clip_pipeline(
-                mkv_path=mkv_path,
-                output_mp4=output_mp4,
-                meta_file_path=meta_file_path,
-                vtt_file_path=vtt_file_path,
-                segments=segments,
-                vf_base=vf_base,
-                is_gapped=is_gapped,
-                do_test=do_test,
-                clip_id=str(clip.idx),
+                mkv_path=mkv_path, output_mp4=output_mp4,
+                meta_file_path=meta_file_path, vtt_file_path=vtt_file_path,
+                segments=segments, vf_base=vf_base, is_gapped=has_gaps(segments),
+                do_test=cfg.do_test, clip_id=str(clip.idx)
             )
 
+            # 4. Dispatch Execution Path
             try:
-                # 3. Handle Execution Path
-                if do_split_scripts:
-                    print(f"[{clip.idx}] Writing multi-line debug script for: {clip.title}...", end="", flush=True)
-                    script_filename = f"encode_{clip.idx}_{safe_title}.sh"
-                    sub_script_path = tape_log_dir / script_filename
-                    
-                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])                  
-                    script_body = [
-                        "#!/usr/bin/env bash",
-                        "set -e\n",
-                        f"# Clip [{clip.idx}]: {clip.title}",
-                        f"# Metadata: {meta_file_path}",
-                        f"# VTT:      {vtt_file_path}",
-                        f"# Output:   {output_mp4}\n",
-                        multiline_cmd + "\n"
-                    ]
-                    
-                    sub_script_path.write_text("\n".join(script_body), encoding="utf-8")
-                    sub_script_path.chmod(0o755)
-                    run_all_lines.append(f"./{script_filename}")
-
-                elif do_dry_run:
-                    multiline_cmd = format_pipeline_to_bash(pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"])
-                    single_script_lines.append(f"# --- Clip [{clip.idx}]: {clip.title} ---")
-                    single_script_lines.append(multiline_cmd + "\n")
-
-                else:
-                    # Live Execution (Direct Python Subprocess)
-                    print(f"[{clip.idx}] Encoding {'TEST ' if do_test else ''}clip: {clip.title}...", end="", flush=True)
-                    log_file.write(f"\n--- Encoding Clip [{clip.idx}]: {clip.title} {'(TEST)' if do_test else ''} ---\n")
-                    log_file.flush()
-
-                    # Execute Stage 1
-                    subprocess.run(pipe["stage1"], stdout=log_file, stderr=log_file, check=True)
-                    
-                    # Execute Stage 2
-                    subprocess.run(pipe["stage2"], stdout=log_file, stderr=log_file, check=True)
-
-                elapsed_str = format_elapsed_time(time.perf_counter() - clip_start_time)
-                print(f" Done ({elapsed_str})")
-                if not do_dry_run and not do_split_scripts:
-                    log_file.write(f"Completed in {elapsed_str}\n")
-
+                process_clip_pipeline(clip, pipe, cfg, tape_log_dir, safe_title, log_file, run_all_lines, single_script_lines)
+                print(f" Done ({format_elapsed_time(time.perf_counter() - clip_start_time)})")
             finally:
-                # Always clean up intermediate lossless MKV
                 if os.path.exists(pipe["tmp_mkv"]):
                     os.remove(pipe["tmp_mkv"])
 
-    if do_split_scripts:
-        master_runner_path = tape_log_dir / "run_all.sh"
-        master_runner_path.write_text("\n".join(run_all_lines) + "\n", encoding="utf-8")
-        master_runner_path.chmod(0o755)
-        print(f"\nGenerated individual multi-line scripts & master runner in: {tape_log_dir}")
-        print(f"Or run all scripts sequentially:     {master_runner_path}")
+    # Final batch script writing
+    if cfg.do_split_scripts:
+        master = tape_log_dir / "run_all.sh"
+        master.write_text("\n".join(run_all_lines) + "\n", encoding="utf-8")
+        master.chmod(0o755)
+    elif cfg.do_dry_run:
+        script_out = tape_log_dir / "run_encode.sh"
+        script_out.write_text("\n".join(single_script_lines), encoding="utf-8")
+        script_out.chmod(0o755)
 
-    elif do_dry_run:
-        script_out_path = tape_log_dir / "run_encode.sh"
-        script_out_path.write_text("\n".join(single_script_lines), encoding="utf-8")
-        script_out_path.chmod(0o755)
-        print(f"\nSaved executable bash script to: {script_out_path}")
-
-    total_elapsed_str = format_elapsed_time(time.perf_counter() - tape_start_time)
-    print(f"\nAll operations complete for '{tape_name}' in {total_elapsed_str}!")
+    print(f"\nAll operations complete for '{cfg.tape_name}' in {format_elapsed_time(time.perf_counter() - tape_start_time)}!")
 
 if __name__ == "__main__":
     main()
