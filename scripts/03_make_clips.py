@@ -171,8 +171,11 @@ def generate_concat_ffmetadata(clip, segments, is_test: bool = False) -> str:
 
     return "\n".join(lines) + "\n"
 
-def convert_ffmetadata_to_vtt(meta_path: str) -> str:
-    """Parses ;FFMETADATA1 text file and converts [CHAPTER] entries into WebVTT format."""
+def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
+    """Parses ;FFMETADATA1 text file and writes a co-located WebVTT file in the log folder."""
+    if not os.path.exists(meta_path):
+        return
+
     chapters = []
     start, end, title = None, None, ""
 
@@ -203,7 +206,8 @@ def convert_ffmetadata_to_vtt(meta_path: str) -> str:
     for idx, (st, en, ti) in enumerate(chapters, 1):
         vtt_lines.append(f"{idx}\n{fmt_time(st)} --> {fmt_time(en)}\n{ti}\n")
 
-    return "\n".join(vtt_lines)
+    with open(vtt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(vtt_lines))
 
 
 def format_multiline_pipeline(
@@ -218,20 +222,17 @@ def format_multiline_pipeline(
 
     # 1. Paths & Setup
     tmp_file = f"/tmp/stage1_{clip_id}.mkv"
-    vtt_file = f"/tmp/stage1_{clip_id}.vtt"
     i_indices = [idx for idx, x in enumerate(cmd_stage2) if x == "-i"]
     meta_path = cmd_stage2[i_indices[1] + 1] if len(i_indices) > 1 else ""
     out_mp4_path = cmd_stage2[-1]
 
-    out_lines.append(f'TMP_FILE={shlex.quote(tmp_file)}')
-    out_lines.append(f'VTT_FILE={shlex.quote(vtt_file)}')
-    out_lines.append('trap \'rm -f "$TMP_FILE" "$VTT_FILE"\' EXIT\n')
+    # Co-locate VTT next to the ffmetadata text file in the log directory
+    vtt_path = meta_path.rsplit(".", 1)[0] + ".vtt" if meta_path else ""
+    if meta_path and vtt_path:
+        convert_ffmetadata_to_vtt(meta_path, vtt_path)
 
-    # Write temporary VTT file for Stage 2
-    if meta_path and os.path.exists(meta_path):
-        vtt_content = convert_ffmetadata_to_vtt(meta_path)
-        with open(vtt_file, "w", encoding="utf-8") as f:
-            f.write(vtt_content)
+    out_lines.append(f'TMP_FILE={shlex.quote(tmp_file)}')
+    out_lines.append('trap \'rm -f "$TMP_FILE"\' EXIT\n')
 
     # 2. Stage 1 Header & Inputs
     out_lines.append("ffmpeg -nostdin -y -loglevel warning -fflags +genpts+discardcorrupt \\")
@@ -246,7 +247,7 @@ def format_multiline_pipeline(
         else:
             i += 1
 
-    # 3. Stage 1 Filters & Lossless MKV Output
+    # 3. Stage 1 Filters & Intermediate Lossless Output
     if is_complex:
         out_lines.append('  -filter_complex "\\')
         for idx, line in enumerate(filter_lines):
@@ -259,9 +260,11 @@ def format_multiline_pipeline(
         out_lines.append(f'  -vf {shlex.quote(vf_str)} -af "asetpts=PTS-STARTPTS,aresample=async=1000:min_hard_comp=0.100000" \\')
         out_lines.append('  -c:v utvideo -c:a pcm_s16le "$TMP_FILE"\n')
 
-    # 4. Stage 2 Encode (Injects ISO metadata + Native QuickTime Chapter Track)
+    # 4. Stage 2 Encode
     out_lines.append("ffmpeg -nostdin -y -loglevel warning -analyzeduration 10M -probesize 10M \\")
-    out_lines.append(f'  -i "$TMP_FILE" -f ffmetadata -i {shlex.quote(meta_path)} -i "$VTT_FILE" \\')
+    out_lines.append('  -channel_layout stereo -i "$TMP_FILE" \\')
+    out_lines.append(f'  -f ffmetadata -i {shlex.quote(meta_path)} \\')
+    out_lines.append(f'  -i {shlex.quote(vtt_path)} \\')
     out_lines.append("  -map 0:v:0 -map 0:a:0 -map 2:s:0 -map_metadata 1 -map_chapters 1 \\")
     out_lines.append("  -movflags +faststart \\")
     out_lines.append("  -c:v libx264 -crf 22 -preset slow -force_key_frames 'expr:eq(n,0)' -g 60 \\")
