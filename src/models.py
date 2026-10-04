@@ -23,8 +23,9 @@ class Clip:
 
 @dataclasses.dataclass
 class ArchiveData:
-    global_crop: str
-    raw_spec: str
+    global_crop: str = ""
+    global_date: str = ""
+    raw_spec: str = ""
     clips: List[Clip] = dataclasses.field(default_factory=list)
     warnings: List[str] = dataclasses.field(default_factory=list)
 

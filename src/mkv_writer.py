@@ -25,11 +25,12 @@ def format_mkv_timestamp(ts: str) -> str:
 
 
 def parse_crop_string(crop_str: str):
-    """Parses 'Top|Bottom|Left|Right' spec string into integer tuple (top, bottom, left, right)."""
+    """Parses 'Top Bottom Left Right' or 'Top|Bottom|Left|Right' spec string into (top, bottom, left, right)."""
     if not crop_str:
         return None
     try:
-        parts = [int(p.strip()) for p in crop_str.split("|")]
+        delimiter = "|" if "|" in crop_str else " "
+        parts = [int(p.strip()) for p in crop_str.split(delimiter) if p.strip()]
         if len(parts) == 4:
             return parts[0], parts[1], parts[2], parts[3]
     except ValueError:
@@ -46,6 +47,23 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
     tags_root = ET.Element("Tags")
     uid_counter = 1000
 
+    # 1. Global Segment Tags (TargetTypeValue = 50)
+    if data.global_date or data.global_crop:
+        g_tag = ET.SubElement(tags_root, "Tag")
+        g_targets = ET.SubElement(g_tag, "Targets")
+        ET.SubElement(g_targets, "TargetTypeValue").text = "50"
+
+        if data.global_date:
+            simple_date = ET.SubElement(g_tag, "Simple")
+            ET.SubElement(simple_date, "Name").text = "DATE_RECORDED"
+            ET.SubElement(simple_date, "String").text = data.global_date
+
+        if data.global_crop:
+            simple_crop = ET.SubElement(g_tag, "Simple")
+            ET.SubElement(simple_crop, "Name").text = "CROPPING"
+            ET.SubElement(simple_crop, "String").text = data.global_crop
+
+    # 2. Clip / Chapter Level Tags and Atom hierarchy
     for clip in data.clips:
         clip_uid = str(uid_counter)
         uid_counter += 1
@@ -65,14 +83,16 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
         ET.SubElement(display, "ChapterString").text = clip.title
         ET.SubElement(display, "ChapterLanguage").text = "eng"
 
-        # Write Clip Tags (Date & Specific Crop if different from global)
-        if clip.date or (clip.crop and clip.crop != data.global_crop):
+        # Write Chapter-Specific Tags (if date/crop differs from global)
+        if (clip.date and clip.date != data.global_date) or (
+            clip.crop and clip.crop != data.global_crop
+        ):
             c_tag = ET.SubElement(tags_root, "Tag")
             c_targets = ET.SubElement(c_tag, "Targets")
             ET.SubElement(c_targets, "TargetTypeValue").text = "30"
             ET.SubElement(c_targets, "ChapterUID").text = clip_uid
 
-            if clip.date:
+            if clip.date and clip.date != data.global_date:
                 simple_date = ET.SubElement(c_tag, "Simple")
                 ET.SubElement(simple_date, "Name").text = "DATE_RECORDED"
                 ET.SubElement(simple_date, "String").text = clip.date
@@ -112,7 +132,7 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
 
 
 def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
-    """In-place updates an MKV file's chapters, tags, and native video track crop fields using mkvpropedit."""
+    """In-place updates an MKV file's title, chapters, tags, and native video track crop fields using mkvpropedit."""
     chapters_xml, tags_xml = generate_mkv_chapters_and_tags(data)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -134,7 +154,16 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
             f"all:{tags_file}",
         ]
 
-        # Apply or clear native video track cropping header properties
+        # 1. Global Segment Title (if in uncut/single-clip mode)
+        is_uncut_mode = (
+            len(data.clips) == 1
+            and data.clips[0].idx in ("", "MASTER", "01")
+            and not data.clips[0].start
+        )
+        if is_uncut_mode and data.clips[0].title:
+            cmd.extend(["--edit", "info", "--set", f"title={data.clips[0].title}"])
+
+        # 2. Native Video Track Cropping
         crop_vals = parse_crop_string(data.global_crop)
         if crop_vals:
             top, bottom, left, right = crop_vals
@@ -153,7 +182,6 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
                 ]
             )
         else:
-            # Clear any previously written crop header fields on re-runs
             cmd.extend(
                 [
                     "--edit",
@@ -171,4 +199,4 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
 
         print(f"Applying metadata to {mkv_path} via mkvpropedit...")
         subprocess.run(cmd, check=True)
-        print(" Successfully wrote native chapters, tags, and video crop fields.")
+        print(" Successfully wrote native chapters, tags, title, and video crop fields.")
