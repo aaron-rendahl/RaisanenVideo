@@ -1,25 +1,21 @@
 # src/mkv_reader.py
 
-import json
 import subprocess
 import xml.etree.ElementTree as ET
 from models import ArchiveData, Clip, Subchapter
 
+
 def read_mkv_metadata(mkv_path: str) -> ArchiveData:
+    """Extracts native Matroska Chapters and Tags XML directly via mkvextract.
+
+    Supports both multi-clip nested parent/child hierarchies and single-clip top-level subchapters.
     """
-    Single Source of Truth Reader:
-    Extracts native Matroska Chapter XML and Tag XML directly from the .mkv container 
-    using mkvextract. Preserves exact nested parent/child subchapter hierarchy and tags.
-    """
-    # 1. Extract embedded Chapters XML directly from container
     chap_cmd = ["mkvextract", "chapters", mkv_path]
     chap_res = subprocess.run(chap_cmd, capture_output=True, text=True, check=True)
-    
-    # 2. Extract embedded Tags XML directly from container
+
     tags_cmd = ["mkvextract", "tags", mkv_path]
     tags_res = subprocess.run(tags_cmd, capture_output=True, text=True, check=True)
 
-    # 3. Parse Tags XML for CROPPING / DATE_RECORDED
     global_crop = ""
     chapter_tags = {}  # chap_uid -> {"crop": ..., "date": ...}
 
@@ -41,26 +37,27 @@ def read_mkv_metadata(mkv_path: str) -> ArchiveData:
             if chap_uid:
                 chapter_tags[chap_uid] = {"crop": crop_val, "date": date_val}
             else:
-                # TargetTypeValue 50 with no ChapterUID is global
                 if crop_val:
                     global_crop = crop_val
 
-    # 4. Parse Chapters XML DOM for Clips & Subchapters
     clips = []
     if chap_res.stdout.strip():
         chap_root = ET.fromstring(chap_res.stdout)
         edition = chap_root.find("EditionEntry")
 
         if edition is not None:
-            for c_idx, parent_atom in enumerate(edition.findall("ChapterAtom"), start=1):
+            top_level_atoms = [elem for elem in list(edition) if elem.tag == "ChapterAtom"]
+
+            for c_idx, parent_atom in enumerate(top_level_atoms, start=1):
                 p_uid = parent_atom.findtext("ChapterUID")
                 p_title = parent_atom.findtext("ChapterDisplay/ChapterString", f"Clip {c_idx}")
                 p_start = parent_atom.findtext("ChapterTimeStart", "00:00:00.000000000")
                 p_end = parent_atom.findtext("ChapterTimeEnd", "")
 
-                # Parse nested child ChapterAtoms as Subchapters
+                child_atoms = [elem for elem in list(parent_atom) if elem.tag == "ChapterAtom"]
+
                 subchapters = []
-                for s_idx, child_atom in enumerate(parent_atom.findall("ChapterAtom"), start=1):
+                for s_idx, child_atom in enumerate(child_atoms, start=1):
                     s_uid = child_atom.findtext("ChapterUID")
                     s_title = child_atom.findtext("ChapterDisplay/ChapterString", f"Subchapter {s_idx}")
                     s_start = child_atom.findtext("ChapterTimeStart", "00:00:00.000000000")
@@ -70,7 +67,7 @@ def read_mkv_metadata(mkv_path: str) -> ArchiveData:
                     subchapters.append(
                         Subchapter(
                             idx=f"{s_idx:02d}",
-                            start=s_start[:12],  # Convert 00:00:00.000000000 to HH:MM:SS.mmm
+                            start=s_start[:12],
                             end=s_end[:12] if s_end else "",
                             title=s_title,
                             crop=s_tag_data.get("crop", ""),
