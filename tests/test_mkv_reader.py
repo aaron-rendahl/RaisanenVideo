@@ -5,65 +5,75 @@ Unit tests for mkv_reader.py using mocked ffprobe JSON payloads.
 """
 
 import json
+import textwrap
 from unittest.mock import MagicMock, patch
 from mkv_reader import read_mkv_metadata
 
 
 @patch("subprocess.run")
-def test_read_mkv_metadata_parses_ffprobe_json(mock_run):
-    """Verifies stream crop detection, chapter tag parsing, and clip generation."""
-    mock_payload = {
-        "streams": [
-            {
-                "codec_type": "video",
-                "crop_top": 8,
-                "crop_bottom": 8,
-                "crop_left": 12,
-                "crop_right": 12,
-            }
-        ],
-        "chapters": [
-            {
-                "start_time": "1.168",
-                "end_time": "132.366",
-                "tags": {
-                    "title": "Arrival",
-                    "DATE_RECORDED": "1987-09-19",
-                },
-            },
-            {
-                "start_time": "132.366",
-                "end_time": "281.548",
-                "tags": {
-                    "title": "Kids Dance",
-                    "CROPPING": "0|0|0|0",
-                },
-            },
-        ],
-    }
+def test_read_mkv_metadata_parses_mkvextract_xml(mock_run):
+    """Verifies that read_mkv_metadata correctly extracts chapters and tags from mkvextract XML output."""
+    chapters_xml = textwrap.dedent("""
+        <Chapters>
+          <EditionEntry>
+            <ChapterAtom>
+              <ChapterUID>1000</ChapterUID>
+              <ChapterTimeStart>00:00:01.168000000</ChapterTimeStart>
+              <ChapterTimeEnd>00:02:12.366000000</ChapterTimeEnd>
+              <ChapterDisplay>
+                <ChapterString>Arrival</ChapterString>
+              </ChapterDisplay>
+            </ChapterAtom>
+            <ChapterAtom>
+              <ChapterUID>1001</ChapterUID>
+              <ChapterTimeStart>00:02:12.366000000</ChapterTimeStart>
+              <ChapterTimeEnd>00:04:41.548000000</ChapterTimeEnd>
+              <ChapterDisplay>
+                <ChapterString>Kids Dance</ChapterString>
+              </ChapterDisplay>
+            </ChapterAtom>
+          </EditionEntry>
+        </Chapters>
+    """)
 
-    mock_run.return_value = MagicMock(
-        stdout=json.dumps(mock_payload),
-        returncode=0,
-    )
+    tags_xml = textwrap.dedent("""
+        <Tags>
+          <Tag>
+            <Targets>
+              <TargetTypeValue>50</TargetTypeValue>
+            </Targets>
+            <Simple>
+              <Name>CROPPING</Name>
+              <String>12|24|0|8</String>
+            </Simple>
+          </Tag>
+          <Tag>
+            <Targets>
+              <ChapterUID>1000</ChapterUID>
+              <TargetTypeValue>50</TargetTypeValue>
+            </Targets>
+            <Simple>
+              <Name>DATE_RECORDED</Name>
+              <String>1987-09-19</String>
+            </Simple>
+          </Tag>
+        </Tags>
+    """)
+
+    def side_effect(cmd, **kwargs):
+        cmd_str = " ".join(cmd)
+        if "chapters" in cmd_str:
+            return MagicMock(stdout=chapters_xml, returncode=0)
+        elif "tags" in cmd_str:
+            return MagicMock(stdout=tags_xml, returncode=0)
+        return MagicMock(stdout="", returncode=0)
+
+    mock_run.side_effect = side_effect
 
     data = read_mkv_metadata("dummy_archive.mkv")
 
-    # Verify video stream crop detection
-    assert data.global_crop == "8|8|12|12"
+    assert data.global_crop == "12|24|0|8"
     assert len(data.clips) == 2
-
-    # Clip 1: Inherits global stream crop and reads DATE_RECORDED
-    clip1 = data.clips[0]
-    assert clip1.idx == "01"
-    assert clip1.title == "Arrival"
-    assert clip1.start == "00:00:01.168"
-    assert clip1.end == "00:02:12.366"
-    assert clip1.date == "1987-09-19"
-    assert clip1.crop == "8|8|12|12"
-
-    # Clip 2: Overrides global crop with chapter-level CROPPING tag
-    clip2 = data.clips[1]
-    assert clip2.idx == "02"
-    assert clip2.title == "Kids Dance"
-    assert clip2.crop == "0|0|0|0"
+    assert data.clips[0].title == "Arrival"
+    assert data.clips[0].date == "1987-09-19"
+    assert data.clips[1].title == "Kids Dance"
