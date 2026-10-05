@@ -18,12 +18,11 @@ $SCRIPT_DIR/01_clean_tape.sh $FLAG8 $ORIGINAL_DIR/$VID.mpg
 
 ## ---------------------------------------------
 ## 2) EMBED METADATA AND TIMESTAMPS
+
 $PYTHON $SCRIPT_DIR/02_embed_metadata.py $VID
 
-
-VID01="$ARCHIVE_DIR/$VID.mkv"
-
 if false; then
+  VID01="$ARCHIVE_DIR/$VID.mkv"
   ## check chapters
   mkvextract chapters "$VID01" | xmllint --format - | less
   ## check global title
@@ -33,3 +32,6 @@ if false; then
   ## check cropping metadata
   mkvinfo $VID01 | grep -i crop
 fi
+
+## ---------------------------------------------
+## 3) CREATE CLIPS
