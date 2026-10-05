@@ -1,36 +1,11 @@
+"""src/ffmpeg_utils.py"""
+
 import os
 import shlex
 import shutil
 from pathlib import Path
 from typing import List, Tuple
 from models import Clip
-
-
-def parse_timestamp_to_seconds(ts: str) -> float:
-    """Converts HH:MM:SS.mmm or HH:MM:SS to total float seconds."""
-    if not ts:
-        return 0.0
-    parts = ts.split(":")
-    if len(parts) == 3:
-        h, m, s = parts
-        return float(h) * 3600 + float(m) * 60 + float(s)
-    elif len(parts) == 2:
-        m, s = parts
-        return float(m) * 60 + float(s)
-    return float(ts)
-
-
-def format_elapsed_time(seconds: float) -> str:
-    """Formats float seconds into a clean display string."""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    if h > 0:
-        return f"{h}h {m}m {s:.1f}s"
-    elif m > 0:
-        return f"{m}m {s:.1f}s"
-    return f"{s:.1f}s"
-
 
 def build_crop_filter(crop_str: str) -> str:
     """Translates 'Top Bottom Left Right' crop boundaries to FFmpeg crop filter strings."""
@@ -46,13 +21,6 @@ def build_crop_filter(crop_str: str) -> str:
         pass
     return ""
 
-
-def has_gaps(segments: List[Tuple[float, float, str]]) -> bool:
-    """Checks if there are non-contiguous gaps between segment boundaries."""
-    for i in range(len(segments) - 1):
-        if abs(segments[i][1] - segments[i + 1][0]) > 0.05:
-            return True
-    return False
 
 
 def generate_concat_ffmetadata(
@@ -123,24 +91,6 @@ def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
     Path(vtt_path).write_text("\n".join(vtt_lines) + "\n", encoding="utf-8")
 
 
-def clean_directory(
-    target_dir: Path,
-    do_uncropped: bool = False,
-    do_cropped: bool = False,
-    frames_mode: bool = False,
-    do_test: bool = False,
-) -> None:
-    """Selectively cleans or resets output log directories depending on execution mode."""
-    if frames_mode:
-        if do_uncropped:
-            for p in target_dir.glob("*a.png"):
-                p.unlink()
-        if do_cropped:
-            for p in target_dir.glob("*b.png"):
-                p.unlink()
-    elif do_test:
-        for p in target_dir.glob("*_test.mp4"):
-            p.unlink()
 
 
 def build_clip_pipeline(
@@ -311,57 +261,21 @@ def format_pipeline_to_bash(
 
     return f"{s1_str}\n\n{s2_str}\n\nrm -f {clean_tmp}"
 
-def resolve_clip_subchapters(
-    clip: Clip, total_duration_sec: float = 0.0
-) -> List[Tuple[str, str, float, float]]:
-    """
-    Single source of truth for resolving subchapter bounds.
-    Returns a list of 4-tuples: (sub_tag, sub_title_safe, start_sec, end_sec).
-    """
-    results = []
-    subchapters = getattr(clip, "subchapters", [])
-
-    if subchapters:
-        for idx, sub in enumerate(subchapters, start=1):
-            s_sec = parse_timestamp_to_seconds(sub.start) if isinstance(sub.start, str) else float(sub.start)
-
-            if getattr(sub, "end", None):
-                e_sec = parse_timestamp_to_seconds(sub.end) if isinstance(sub.end, str) else float(sub.end)
-            elif idx < len(subchapters):
-                next_start = subchapters[idx].start
-                e_sec = parse_timestamp_to_seconds(next_start) if isinstance(next_start, str) else float(next_start)
-            else:
-                e_sec = total_duration_sec
-
-            sub_title_raw = getattr(sub, "title", f"chapter_{idx}")
-            sub_title_safe = "".join(
-                c if c.isalnum() or c in (" ", "-", "_") else "" for c in sub_title_raw
-            ).strip().replace(" ", "_")
-
-            sub_tag = getattr(sub, "idx", None) or f"{idx:02d}"
-            results.append((sub_tag, sub_title_safe, s_sec, e_sec))
-    else:
-        # Fallback for standalone clips without subchapters
-        s_sec = parse_timestamp_to_seconds(clip.start) if isinstance(clip.start, str) else float(clip.start)
-        e_sec = parse_timestamp_to_seconds(clip.end) if clip.end else total_duration_sec
-
-        clip_title_raw = getattr(clip, "title", "clip")
-        clip_title_safe = "".join(
-            c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip_title_raw
-        ).strip().replace(" ", "_")
-
-        sub_tag = getattr(clip, "idx", "01")
-        results.append((sub_tag, clip_title_safe, s_sec, e_sec))
-
-    return results
-
-
-def resolve_subsegments(
-    clip: Clip, total_duration_sec: float = 0.0
-) -> List[Tuple[float, float, str]]:
-    """
-    Backwards-compatible bridge for FFmpeg pipeline builders.
-    Returns list of 3-tuples: (start_sec, end_sec, title).
-    """
-    resolved = resolve_clip_subchapters(clip, total_duration_sec)
-    return [(s_sec, e_sec, title) for _, title, s_sec, e_sec in resolved]
+def clean_directory(
+    target_dir: Path,
+    do_uncropped: bool = False,
+    do_cropped: bool = False,
+    frames_mode: bool = False,
+    do_test: bool = False,
+) -> None:
+    """Selectively cleans or resets output log directories depending on execution mode."""
+    if frames_mode:
+        if do_uncropped:
+            for p in target_dir.glob("*a.png"):
+                p.unlink()
+        if do_cropped:
+            for p in target_dir.glob("*b.png"):
+                p.unlink()
+    elif do_test:
+        for p in target_dir.glob("*_test.mp4"):
+            p.unlink()
