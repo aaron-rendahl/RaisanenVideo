@@ -98,3 +98,20 @@ def test_mkv_xml_chapter_cropping_tag_targeting():
     # 2. Chapter-specific crop tag assertion
     assert "<String>26 10 8 8</String>" in tags_xml
     assert "<ChapterUID>" in tags_xml
+
+def test_mkv_xml_no_empty_tags_when_inheriting_global_crop():
+    """Verifies that chapters inheriting global crop settings do not generate empty <Tag> blocks."""
+    spec_text = textwrap.dedent("""
+        GLOBAL_CROP = 30 6 18 8
+
+        01 | 00:00:08.108 | 00:12:33.319 | BWCA
+    """)
+
+    parsed_data = read_tape_spec(spec_text)
+    chapters_xml, tags_xml = generate_mkv_chapters_and_tags(parsed_data)
+
+    # Global crop tag should exist
+    assert "<String>30 6 18 8</String>" in tags_xml
+
+    # No ChapterUID-targeted tags should exist because Chapter 01 has no overrides
+    assert "<ChapterUID>" not in tags_xml

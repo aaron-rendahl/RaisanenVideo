@@ -80,7 +80,12 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
 
     # Helper to generate chapter-level tag entries bound via ChapterUID
     def add_chapter_tags(chap_uid: str, crop_val: str = "", date_val: str = ""):
-        if not (crop_val or date_val):
+        # Determine if there is any chapter-specific metadata to write
+        has_custom_crop = bool(crop_val and crop_val != data.global_crop)
+        has_custom_date = bool(date_val)
+
+        # Do not create an empty <Tag> element if there are no <Simple> children
+        if not (has_custom_crop or has_custom_date):
             return
 
         c_tag = ET.SubElement(tags_root, "Tag")
@@ -88,12 +93,12 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
         ET.SubElement(c_targets, "ChapterUID").text = chap_uid
         ET.SubElement(c_targets, "TargetTypeValue").text = "50"
 
-        if date_val:
+        if has_custom_date:
             s_date = ET.SubElement(c_tag, "Simple")
             ET.SubElement(s_date, "Name").text = "DATE_RECORDED"
             ET.SubElement(s_date, "String").text = date_val
 
-        if crop_val and crop_val != data.global_crop:
+        if has_custom_crop:
             s_crop = ET.SubElement(c_tag, "Simple")
             ET.SubElement(s_crop, "Name").text = "CROPPING"
             ET.SubElement(s_crop, "String").text = crop_val
