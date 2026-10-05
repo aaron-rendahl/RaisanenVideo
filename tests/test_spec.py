@@ -134,3 +134,20 @@ def test_spec_roundtrip_integrity():
         parsed_1.clips[0].subchapters[0].start
         == parsed_2.clips[0].subchapters[0].start
     )
+
+
+def test_spec_roundtrip_writing():
+    """Verifies that write_tape_spec outputs non-empty spec strings for reconstructed models."""
+    spec_text = textwrap.dedent("""
+        TITLE = Willy’s 40th Birthday Party
+        GLOBAL_DATE = 1987-09-19
+
+        01 | 00:00:01.168 | arrival
+    """)
+
+    parsed_data = read_tape_spec(spec_text)
+    recreated_spec_text = write_tape_spec(parsed_data)
+
+    assert len(recreated_spec_text.strip()) > 0
+    reparsed_data = read_tape_spec(recreated_spec_text)
+    assert len(reparsed_data.clips) == len(parsed_data.clips)

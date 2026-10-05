@@ -1,5 +1,18 @@
 """src/time_utils.py"""
 
+def format_ffprobe_timestamp(seconds_str: str) -> str:
+    """Converts ffprobe time in seconds to HH:MM:SS.mmm format."""
+    try:
+        total_seconds = float(seconds_str)
+    except (ValueError, TypeError):
+        return "00:00:00.000"
+
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = total_seconds % 60
+
+    return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
 def parse_timestamp_to_seconds(ts: str) -> float:
     """Converts HH:MM:SS.mmm or HH:MM:SS to total float seconds."""
     if not ts:

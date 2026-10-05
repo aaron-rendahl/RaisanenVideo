@@ -1,80 +1,98 @@
+# src/mkv_reader.py
+
 import json
 import subprocess
+import xml.etree.ElementTree as ET
 from models import ArchiveData, Clip, Subchapter
 
-
-def format_ffprobe_timestamp(seconds_str: str) -> str:
-    """Converts ffprobe time in seconds to HH:MM:SS.mmm format."""
-    try:
-        total_seconds = float(seconds_str)
-    except (ValueError, TypeError):
-        return "00:00:00.000"
-
-    hours = int(total_seconds // 3600)
-    minutes = int((total_seconds % 3600) // 60)
-    seconds = total_seconds % 60
-
-    return f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
-
-
 def read_mkv_metadata(mkv_path: str) -> ArchiveData:
-    """Reads chapters, clip dates, crop overrides, and native track cropping from an MKV file."""
-    cmd = [
-        "ffprobe",
-        "-v",
-        "quiet",
-        "-print_format",
-        "json",
-        "-show_chapters",
-        "-show_streams",
-        mkv_path,
-    ]
+    """
+    Single Source of Truth Reader:
+    Extracts native Matroska Chapter XML and Tag XML directly from the .mkv container 
+    using mkvextract. Preserves exact nested parent/child subchapter hierarchy and tags.
+    """
+    # 1. Extract embedded Chapters XML directly from container
+    chap_cmd = ["mkvextract", "chapters", mkv_path]
+    chap_res = subprocess.run(chap_cmd, capture_output=True, text=True, check=True)
+    
+    # 2. Extract embedded Tags XML directly from container
+    tags_cmd = ["mkvextract", "tags", mkv_path]
+    tags_res = subprocess.run(tags_cmd, capture_output=True, text=True, check=True)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    probe_data = json.loads(result.stdout)
-
-    # 1. Read Native Video Track Header Cropping
+    # 3. Parse Tags XML for CROPPING / DATE_RECORDED
     global_crop = ""
-    for stream in probe_data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            top = stream.get("crop_top", 0)
-            bottom = stream.get("crop_bottom", 0)
-            left = stream.get("crop_left", 0)
-            right = stream.get("crop_right", 0)
+    chapter_tags = {}  # chap_uid -> {"crop": ..., "date": ...}
 
-            if any([top, bottom, left, right]):
-                global_crop = f"{top}|{bottom}|{left}|{right}"
-            break
+    if tags_res.stdout.strip():
+        tags_root = ET.fromstring(tags_res.stdout)
+        for tag in tags_root.findall("Tag"):
+            chap_uid = tag.findtext("Targets/ChapterUID")
+            crop_val = ""
+            date_val = ""
 
-    # 2. Extract Chapters & Target Tags
-    raw_chapters = probe_data.get("chapters", [])
+            for simple in tag.findall("Simple"):
+                name = simple.findtext("Name")
+                string_val = simple.findtext("String")
+                if name == "CROPPING":
+                    crop_val = string_val
+                elif name == "DATE_RECORDED":
+                    date_val = string_val
+
+            if chap_uid:
+                chapter_tags[chap_uid] = {"crop": crop_val, "date": date_val}
+            else:
+                # TargetTypeValue 50 with no ChapterUID is global
+                if crop_val:
+                    global_crop = crop_val
+
+    # 4. Parse Chapters XML DOM for Clips & Subchapters
     clips = []
+    if chap_res.stdout.strip():
+        chap_root = ET.fromstring(chap_res.stdout)
+        edition = chap_root.find("EditionEntry")
 
-    for idx, chap in enumerate(raw_chapters, start=1):
-        chap_tags = chap.get("tags", {})
-        title = chap_tags.get("title", f"Clip {idx}")
-        date = chap_tags.get("DATE_RECORDED", "")
+        if edition is not None:
+            for c_idx, parent_atom in enumerate(edition.findall("ChapterAtom"), start=1):
+                p_uid = parent_atom.findtext("ChapterUID")
+                p_title = parent_atom.findtext("ChapterDisplay/ChapterString", f"Clip {c_idx}")
+                p_start = parent_atom.findtext("ChapterTimeStart", "00:00:00.000000000")
+                p_end = parent_atom.findtext("ChapterTimeEnd", "")
 
-        # Use chapter-level crop override if present; otherwise fall back to global track crop
-        clip_crop = chap_tags.get("CROPPING", global_crop)
+                # Parse nested child ChapterAtoms as Subchapters
+                subchapters = []
+                for s_idx, child_atom in enumerate(parent_atom.findall("ChapterAtom"), start=1):
+                    s_uid = child_atom.findtext("ChapterUID")
+                    s_title = child_atom.findtext("ChapterDisplay/ChapterString", f"Subchapter {s_idx}")
+                    s_start = child_atom.findtext("ChapterTimeStart", "00:00:00.000000000")
+                    s_end = child_atom.findtext("ChapterTimeEnd", "")
+                    s_tag_data = chapter_tags.get(s_uid, {})
 
-        start_time = format_ffprobe_timestamp(chap.get("start_time", "0"))
-        end_time = format_ffprobe_timestamp(chap.get("end_time", "0"))
+                    subchapters.append(
+                        Subchapter(
+                            idx=f"{s_idx:02d}",
+                            start=s_start[:12],  # Convert 00:00:00.000000000 to HH:MM:SS.mmm
+                            end=s_end[:12] if s_end else "",
+                            title=s_title,
+                            crop=s_tag_data.get("crop", ""),
+                            date=s_tag_data.get("date", ""),
+                        )
+                    )
 
-        clip_idx = f"{idx:02d}"
-
-        clip = Clip(
-            idx=clip_idx,
-            start=start_time,
-            end=end_time,
-            title=title,
-            date=date,
-            crop=clip_crop,
-        )
-        clips.append(clip)
+                p_tag_data = chapter_tags.get(p_uid, {})
+                clips.append(
+                    Clip(
+                        idx=f"{c_idx:02d}",
+                        start=p_start[:12],
+                        end=p_end[:12] if p_end else "",
+                        title=p_title,
+                        date=p_tag_data.get("date", ""),
+                        crop=p_tag_data.get("crop", global_crop),
+                        subchapters=subchapters,
+                    )
+                )
 
     return ArchiveData(
         global_crop=global_crop,
-        raw_spec="",  # Native Matroska chapters/tags are single source of truth
+        raw_spec="",
         clips=clips,
     )
