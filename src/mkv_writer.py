@@ -37,6 +37,11 @@ def parse_crop_string(crop_str: str):
         pass
     return None
 
+import xml.etree.ElementTree as ET
+import xml.dom.minidom as minidom
+from models import ArchiveData
+
+
 def generate_mkv_chapters_and_tags(data: ArchiveData):
     """Generates Matroska XML chapters and tags from ArchiveData."""
     chapters_root = ET.Element("Chapters")
@@ -73,7 +78,27 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
             ET.SubElement(simple_crop, "Name").text = "CROPPING"
             ET.SubElement(simple_crop, "String").text = data.global_crop
 
-    # 3. Write Chapter Atoms
+    # Helper to generate chapter-level tag entries bound via ChapterUID
+    def add_chapter_tags(chap_uid: str, crop_val: str = "", date_val: str = ""):
+        if not (crop_val or date_val):
+            return
+
+        c_tag = ET.SubElement(tags_root, "Tag")
+        c_targets = ET.SubElement(c_tag, "Targets")
+        ET.SubElement(c_targets, "ChapterUID").text = chap_uid
+        ET.SubElement(c_targets, "TargetTypeValue").text = "50"
+
+        if date_val:
+            s_date = ET.SubElement(c_tag, "Simple")
+            ET.SubElement(s_date, "Name").text = "DATE_RECORDED"
+            ET.SubElement(s_date, "String").text = date_val
+
+        if crop_val and crop_val != data.global_crop:
+            s_crop = ET.SubElement(c_tag, "Simple")
+            ET.SubElement(s_crop, "Name").text = "CROPPING"
+            ET.SubElement(s_crop, "String").text = crop_val
+
+    # 3. Write Chapter Atoms and Chapter-Level Tags
     for clip in data.clips:
         if is_uncut_mode and clip.subchapters:
             # Uncut single-tape mode: Emit subchapters directly at top level
@@ -94,6 +119,12 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
                 sub_display = ET.SubElement(sub_atom, "ChapterDisplay")
                 ET.SubElement(sub_display, "ChapterString").text = sub.title
                 ET.SubElement(sub_display, "ChapterLanguage").text = "eng"
+
+                add_chapter_tags(
+                    sub_uid,
+                    crop_val=getattr(sub, "crop", ""),
+                    date_val=getattr(sub, "date", "")
+                )
         else:
             # Multi-clip mode: Parent clip Atom with nested child subchapters
             clip_uid = str(uid_counter)
@@ -113,6 +144,12 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
             ET.SubElement(display, "ChapterString").text = clip.title
             ET.SubElement(display, "ChapterLanguage").text = "eng"
 
+            add_chapter_tags(
+                clip_uid,
+                crop_val=getattr(clip, "crop", ""),
+                date_val=getattr(clip, "date", "")
+            )
+
             for sub in clip.subchapters:
                 sub_uid = str(uid_counter)
                 uid_counter += 1
@@ -131,6 +168,12 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
                 ET.SubElement(sub_display, "ChapterString").text = sub.title
                 ET.SubElement(sub_display, "ChapterLanguage").text = "eng"
 
+                add_chapter_tags(
+                    sub_uid,
+                    crop_val=getattr(sub, "crop", ""),
+                    date_val=getattr(sub, "date", "")
+                )
+
     chapters_xml = minidom.parseString(
         ET.tostring(chapters_root, encoding="utf-8")
     ).toprettyxml(indent="  ")
@@ -139,7 +182,6 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
     ).toprettyxml(indent="  ")
 
     return chapters_xml, tags_xml
-
 
 def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
     """In-place updates an MKV file's title, chapters, tags, and native video track crop fields using mkvpropedit."""
