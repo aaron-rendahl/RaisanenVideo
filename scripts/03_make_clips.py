@@ -154,9 +154,10 @@ def capture_diagnostic_frames(
     log_file,
     single_script_lines: list[str],
 ) -> None:
-    """Captures diagnostic frame snapshots (1=start, 2=mid, 3=end) using pre-resolved chapter bounds."""
+    """Captures diagnostic frame snapshots (1=start, 2=mid, 3=end) for all resolved subchapters/segments."""
     tape_stem = tape_log_dir.name.replace("-log", "")
 
+    # Iterate over every subchapter tuple: (sub_tag, sub_title, start_sec, end_sec)
     for sub_tag, sub_title, s_sec, e_sec in chapter_targets:
         duration = max(0.1, e_sec - s_sec)
         mid_sec = s_sec + (duration / 2.0)
@@ -164,8 +165,9 @@ def capture_diagnostic_frames(
 
         timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
 
+        # Construct frame stem using clip index and subchapter tag
         if hasattr(clip, "subchapters") and clip.subchapters:
-            snapshot_prefix = f"{tape_stem}_{sub_tag}_{sub_title}"
+            snapshot_prefix = f"{tape_stem}_{clip.idx}.{sub_tag}_{sub_title}"
         else:
             snapshot_prefix = f"{tape_stem}_{clip.idx}_{sub_title}"
 
@@ -306,7 +308,6 @@ def main():
             clip_start_time = time.perf_counter()
             # Single source of truth for subchapter resolution
             chapter_targets = resolve_clip_subchapters(clip, total_duration_sec)
-            segments = [(s, e, title) for _, title, s, e in chapter_targets]
 
             safe_title = (
                 "".join(
