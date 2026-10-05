@@ -11,6 +11,13 @@ ARCHIVE_DIR="./01_archive"
 $PYTHON=python3
 
 ## ---------------------------------------------
+## 0) Unit tests on the code
+if false; then
+  pytest
+fi
+
+
+## ---------------------------------------------
 ## 1) MAKE THE ARCHIVAL VERSION
 
 [[ "$IS8MM" = true ]] && FLAG8="-8" ||  FLAG8=""
@@ -19,8 +26,11 @@ $SCRIPT_DIR/01_clean_tape.sh $FLAG8 $ORIGINAL_DIR/$VID.mpg
 ## ---------------------------------------------
 ## 2) EMBED METADATA AND TIMESTAMPS
 
+## 2a) Using LosslessCut, determine timestamps and create spec file in 03_specs
+## 2b) Embed metadata and timestamps:
 $PYTHON $SCRIPT_DIR/02_embed_metadata.py $VID
 
+## 2c) Check that they were written properly
 if false; then
   VID01="$ARCHIVE_DIR/$VID.mkv"
   ## check chapters
@@ -35,3 +45,17 @@ fi
 
 ## ---------------------------------------------
 ## 3) CREATE CLIPS
+
+if false; then
+  $SCRIPT_DIR/03_make_clips.py --uncropped-frames $VID
+  $SCRIPT_DIR/03_make_clips.py --frames-only $VID
+fi
+
+
+
+## -----------------------------------------------
+## 4) CREATE INDEX SLIDE (if not already created)
+
+if false; then
+  $SCRIPT_DIR/04_create_index.sh
+fi
