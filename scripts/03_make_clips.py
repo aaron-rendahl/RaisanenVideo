@@ -63,22 +63,25 @@ SRC_DIR = BASE_DIR / "src"
 # Add src/ to sys.path for mkv_reader and video_duration imports
 sys.path.insert(0, str(SRC_DIR))
 
+# Import execution helpers from sidecar module
 from mkv_reader import read_mkv_metadata
 from video_duration import get_video_duration
-
-# Import execution helpers from sidecar module
-from tape_utils import (
+from ffmpeg_utils import (
     build_clip_pipeline,
     build_crop_filter,
     clean_directory,
     convert_ffmetadata_to_vtt,
-    format_elapsed_time,
     format_pipeline_to_bash,
     generate_concat_ffmetadata,
+)
+from segment_utils import (
     has_gaps,
-    parse_timestamp_to_seconds,
     resolve_clip_subchapters,
     resolve_subsegments,
+)
+from time_utils import (
+    format_elapsed_time,
+    parse_timestamp_to_seconds,
 )
 
 ACTIVE_TEMP_FILES = set()
