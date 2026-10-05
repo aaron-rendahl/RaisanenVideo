@@ -77,8 +77,8 @@ from tape_utils import (
     generate_concat_ffmetadata,
     has_gaps,
     parse_timestamp_to_seconds,
-    resolve_subsegments,
     resolve_clip_subchapters,
+    resolve_subsegments,
 )
 
 ACTIVE_TEMP_FILES = set()
@@ -301,8 +301,9 @@ def main():
     with open(log_file_path, "a", encoding="utf-8") as log_file:
         for clip in data.clips:
             clip_start_time = time.perf_counter()
-            segments = resolve_subsegments(clip, total_duration_sec)
-            chapter_targets = resolve_clip_subchapters(clip, segments, total_duration_sec)
+            # Single source of truth for subchapter resolution
+            chapter_targets = resolve_clip_subchapters(clip, total_duration_sec)
+            segments = [(s, e, title) for _, title, s, e in chapter_targets]
 
             safe_title = (
                 "".join(

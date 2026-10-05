@@ -47,23 +47,6 @@ def build_crop_filter(crop_str: str) -> str:
     return ""
 
 
-def resolve_subsegments(
-    clip: Clip, total_duration_sec: float = 0.0
-) -> List[Tuple[float, float, str]]:
-    """Converts clip subchapters into (start_sec, end_sec, title) segment tuples."""
-    segments = []
-    if clip.subchapters:
-        for sub in clip.subchapters:
-            s_sec = parse_timestamp_to_seconds(sub.start)
-            e_sec = parse_timestamp_to_seconds(sub.end) if sub.end else total_duration_sec
-            segments.append((s_sec, e_sec, sub.title))
-    else:
-        s_sec = parse_timestamp_to_seconds(clip.start)
-        e_sec = parse_timestamp_to_seconds(clip.end) if clip.end else total_duration_sec
-        segments.append((s_sec, e_sec, clip.title))
-    return segments
-
-
 def has_gaps(segments: List[Tuple[float, float, str]]) -> bool:
     """Checks if there are non-contiguous gaps between segment boundaries."""
     for i in range(len(segments) - 1):
@@ -328,42 +311,27 @@ def format_pipeline_to_bash(
 
     return f"{s1_str}\n\n{s2_str}\n\nrm -f {clean_tmp}"
 
-
 def resolve_clip_subchapters(
-    clip, segments: list, total_duration_sec: float
-) -> list[tuple[str, str, float, float]]:
+    clip: Clip, total_duration_sec: float = 0.0
+) -> List[Tuple[str, str, float, float]]:
     """
-    Returns a unified list of 4-tuples: (sub_tag, sub_title, start_sec, end_sec).
-    Single source of truth for subchapter bounds across diagnostic frames and encoding.
+    Single source of truth for resolving subchapter bounds.
+    Returns a list of 4-tuples: (sub_tag, sub_title_safe, start_sec, end_sec).
     """
     results = []
-
-    # Check if clip has subchapters populated
     subchapters = getattr(clip, "subchapters", [])
 
     if subchapters:
         for idx, sub in enumerate(subchapters, start=1):
-            s_sec = (
-                parse_timestamp_to_seconds(sub.start)
-                if isinstance(sub.start, str)
-                else float(sub.start)
-            )
+            s_sec = parse_timestamp_to_seconds(sub.start) if isinstance(sub.start, str) else float(sub.start)
 
             if getattr(sub, "end", None):
-                e_sec = (
-                    parse_timestamp_to_seconds(sub.end)
-                    if isinstance(sub.end, str)
-                    else float(sub.end)
-                )
+                e_sec = parse_timestamp_to_seconds(sub.end) if isinstance(sub.end, str) else float(sub.end)
             elif idx < len(subchapters):
                 next_start = subchapters[idx].start
-                e_sec = (
-                    parse_timestamp_to_seconds(next_start)
-                    if isinstance(next_start, str)
-                    else float(next_start)
-                )
+                e_sec = parse_timestamp_to_seconds(next_start) if isinstance(next_start, str) else float(next_start)
             else:
-                e_sec = segments[-1][1] if segments else total_duration_sec
+                e_sec = total_duration_sec
 
             sub_title_raw = getattr(sub, "title", f"chapter_{idx}")
             sub_title_safe = "".join(
@@ -372,17 +340,28 @@ def resolve_clip_subchapters(
 
             sub_tag = getattr(sub, "idx", None) or f"{idx:02d}"
             results.append((sub_tag, sub_title_safe, s_sec, e_sec))
-
     else:
-        # Fallback to segment tuples (s_sec, e_sec, title)
+        # Fallback for standalone clips without subchapters
+        s_sec = parse_timestamp_to_seconds(clip.start) if isinstance(clip.start, str) else float(clip.start)
+        e_sec = parse_timestamp_to_seconds(clip.end) if clip.end else total_duration_sec
+
         clip_title_raw = getattr(clip, "title", "clip")
         clip_title_safe = "".join(
             c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip_title_raw
         ).strip().replace(" ", "_")
 
-        for sub_idx, seg in enumerate(segments, start=1):
-            s_sec, e_sec = seg[0], seg[1]
-            sub_tag = f"{sub_idx:02d}"
-            results.append((sub_tag, clip_title_safe, s_sec, e_sec))
+        sub_tag = getattr(clip, "idx", "01")
+        results.append((sub_tag, clip_title_safe, s_sec, e_sec))
 
     return results
+
+
+def resolve_subsegments(
+    clip: Clip, total_duration_sec: float = 0.0
+) -> List[Tuple[float, float, str]]:
+    """
+    Backwards-compatible bridge for FFmpeg pipeline builders.
+    Returns list of 3-tuples: (start_sec, end_sec, title).
+    """
+    resolved = resolve_clip_subchapters(clip, total_duration_sec)
+    return [(s_sec, e_sec, title) for _, title, s_sec, e_sec in resolved]
