@@ -37,7 +37,6 @@ def parse_crop_string(crop_str: str):
         pass
     return None
 
-
 def generate_mkv_chapters_and_tags(data: ArchiveData):
     """Generates Matroska XML chapters and tags from ArchiveData."""
     chapters_root = ET.Element("Chapters")
@@ -47,11 +46,22 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
     tags_root = ET.Element("Tags")
     uid_counter = 1000
 
-    # 1. Global Segment Tags (TargetTypeValue = 50)
-    if data.global_date or data.global_crop:
+    # 1. Check Mode: Single-clip uncut master tape vs Multi-clip tape
+    is_uncut_mode = (
+        len(data.clips) == 1
+        and data.clips[0].idx in ("", "MASTER", "01")
+    )
+
+    # 2. Global Segment Tags (TargetTypeValue = 50)
+    if data.global_date or data.global_crop or (is_uncut_mode and data.clips[0].title):
         g_tag = ET.SubElement(tags_root, "Tag")
         g_targets = ET.SubElement(g_tag, "Targets")
         ET.SubElement(g_targets, "TargetTypeValue").text = "50"
+
+        if is_uncut_mode and data.clips[0].title:
+            simple_title = ET.SubElement(g_tag, "Simple")
+            ET.SubElement(simple_title, "Name").text = "TITLE"
+            ET.SubElement(simple_title, "String").text = data.clips[0].title
 
         if data.global_date:
             simple_date = ET.SubElement(g_tag, "Simple")
@@ -63,63 +73,63 @@ def generate_mkv_chapters_and_tags(data: ArchiveData):
             ET.SubElement(simple_crop, "Name").text = "CROPPING"
             ET.SubElement(simple_crop, "String").text = data.global_crop
 
-    # 2. Clip / Chapter Level Tags and Atom hierarchy
+    # 3. Write Chapter Atoms
     for clip in data.clips:
-        clip_uid = str(uid_counter)
-        uid_counter += 1
+        if is_uncut_mode and clip.subchapters:
+            # Uncut single-tape mode: Emit subchapters directly at top level
+            for sub in clip.subchapters:
+                sub_uid = str(uid_counter)
+                uid_counter += 1
 
-        # Chapter Atom for parent Clip
-        clip_atom = ET.SubElement(edition, "ChapterAtom")
-        ET.SubElement(clip_atom, "ChapterUID").text = clip_uid
-        ET.SubElement(
-            clip_atom, "ChapterTimeStart"
-        ).text = format_mkv_timestamp(clip.start)
-        if clip.end:
-            ET.SubElement(
-                clip_atom, "ChapterTimeEnd"
-            ).text = format_mkv_timestamp(clip.end)
+                sub_atom = ET.SubElement(edition, "ChapterAtom")
+                ET.SubElement(sub_atom, "ChapterUID").text = sub_uid
+                ET.SubElement(
+                    sub_atom, "ChapterTimeStart"
+                ).text = format_mkv_timestamp(sub.start)
+                if sub.end:
+                    ET.SubElement(
+                        sub_atom, "ChapterTimeEnd"
+                    ).text = format_mkv_timestamp(sub.end)
 
-        display = ET.SubElement(clip_atom, "ChapterDisplay")
-        ET.SubElement(display, "ChapterString").text = clip.title
-        ET.SubElement(display, "ChapterLanguage").text = "eng"
-
-        # Write Chapter-Specific Tags (if date/crop differs from global)
-        if (clip.date and clip.date != data.global_date) or (
-            clip.crop and clip.crop != data.global_crop
-        ):
-            c_tag = ET.SubElement(tags_root, "Tag")
-            c_targets = ET.SubElement(c_tag, "Targets")
-            ET.SubElement(c_targets, "TargetTypeValue").text = "30"
-            ET.SubElement(c_targets, "ChapterUID").text = clip_uid
-
-            if clip.date and clip.date != data.global_date:
-                simple_date = ET.SubElement(c_tag, "Simple")
-                ET.SubElement(simple_date, "Name").text = "DATE_RECORDED"
-                ET.SubElement(simple_date, "String").text = clip.date
-
-            if clip.crop and clip.crop != data.global_crop:
-                simple_crop = ET.SubElement(c_tag, "Simple")
-                ET.SubElement(simple_crop, "Name").text = "CROPPING"
-                ET.SubElement(simple_crop, "String").text = clip.crop
-
-        # Nested Child Subchapters
-        for sub in clip.subchapters:
-            sub_uid = str(uid_counter)
+                sub_display = ET.SubElement(sub_atom, "ChapterDisplay")
+                ET.SubElement(sub_display, "ChapterString").text = sub.title
+                ET.SubElement(sub_display, "ChapterLanguage").text = "eng"
+        else:
+            # Multi-clip mode: Parent clip Atom with nested child subchapters
+            clip_uid = str(uid_counter)
             uid_counter += 1
 
-            sub_atom = ET.SubElement(clip_atom, "ChapterAtom")
-            ET.SubElement(sub_atom, "ChapterUID").text = sub_uid
+            clip_atom = ET.SubElement(edition, "ChapterAtom")
+            ET.SubElement(clip_atom, "ChapterUID").text = clip_uid
             ET.SubElement(
-                sub_atom, "ChapterTimeStart"
-            ).text = format_mkv_timestamp(sub.start)
-            if sub.end:
+                clip_atom, "ChapterTimeStart"
+            ).text = format_mkv_timestamp(clip.start)
+            if clip.end:
                 ET.SubElement(
-                    sub_atom, "ChapterTimeEnd"
-                ).text = format_mkv_timestamp(sub.end)
+                    clip_atom, "ChapterTimeEnd"
+                ).text = format_mkv_timestamp(clip.end)
 
-            sub_display = ET.SubElement(sub_atom, "ChapterDisplay")
-            ET.SubElement(sub_display, "ChapterString").text = sub.title
-            ET.SubElement(sub_display, "ChapterLanguage").text = "eng"
+            display = ET.SubElement(clip_atom, "ChapterDisplay")
+            ET.SubElement(display, "ChapterString").text = clip.title
+            ET.SubElement(display, "ChapterLanguage").text = "eng"
+
+            for sub in clip.subchapters:
+                sub_uid = str(uid_counter)
+                uid_counter += 1
+
+                sub_atom = ET.SubElement(clip_atom, "ChapterAtom")
+                ET.SubElement(sub_atom, "ChapterUID").text = sub_uid
+                ET.SubElement(
+                    sub_atom, "ChapterTimeStart"
+                ).text = format_mkv_timestamp(sub.start)
+                if sub.end:
+                    ET.SubElement(
+                        sub_atom, "ChapterTimeEnd"
+                    ).text = format_mkv_timestamp(sub.end)
+
+                sub_display = ET.SubElement(sub_atom, "ChapterDisplay")
+                ET.SubElement(sub_display, "ChapterString").text = sub.title
+                ET.SubElement(sub_display, "ChapterLanguage").text = "eng"
 
     chapters_xml = minidom.parseString(
         ET.tostring(chapters_root, encoding="utf-8")
@@ -154,16 +164,15 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
             f"all:{tags_file}",
         ]
 
-        # 1. Global Segment Title (if in uncut/single-clip mode)
+        # Explicitly set segment title header in mkvpropedit
         is_uncut_mode = (
             len(data.clips) == 1
             and data.clips[0].idx in ("", "MASTER", "01")
-            and not data.clips[0].start
         )
         if is_uncut_mode and data.clips[0].title:
             cmd.extend(["--edit", "info", "--set", f"title={data.clips[0].title}"])
 
-        # 2. Native Video Track Cropping
+        # Track cropping execution...
         crop_vals = parse_crop_string(data.global_crop)
         if crop_vals:
             top, bottom, left, right = crop_vals
@@ -181,22 +190,6 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
                     f"pixel-crop-right={right}",
                 ]
             )
-        else:
-            cmd.extend(
-                [
-                    "--edit",
-                    "track:v1",
-                    "--delete",
-                    "pixel-crop-top",
-                    "--delete",
-                    "pixel-crop-bottom",
-                    "--delete",
-                    "pixel-crop-left",
-                    "--delete",
-                    "pixel-crop-right",
-                ]
-            )
 
-        print(f"Applying metadata to {mkv_path} via mkvpropedit...")
         subprocess.run(cmd, check=True)
-        print(" Successfully wrote native chapters, tags, title, and video crop fields.")
+
