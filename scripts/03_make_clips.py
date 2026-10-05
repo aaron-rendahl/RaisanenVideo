@@ -78,6 +78,7 @@ from tape_utils import (
     has_gaps,
     parse_timestamp_to_seconds,
     resolve_subsegments,
+    resolve_clip_subchapters,
 )
 
 ACTIVE_TEMP_FILES = set()
@@ -142,7 +143,7 @@ def parse_cli_args(argv: list[str]) -> CLIConfig:
 
 def capture_diagnostic_frames(
     clip,
-    segments: list,
+    chapter_targets: list[tuple[str, str, float, float]],
     mkv_path: Path,
     tape_log_dir: Path,
     ffmpeg_crop: str,
@@ -150,26 +151,29 @@ def capture_diagnostic_frames(
     log_file,
     single_script_lines: list[str],
 ) -> None:
-    """Captures diagnostic frame snapshots for uncropped ('a') and cropped ('b') states."""
-    safe_title = "".join(
-        c if c.isalnum() or c in (" ", "-", "_") else "" for c in clip.title
-    ).strip().replace(" ", "_")
+    """Captures diagnostic frame snapshots (1=start, 2=mid, 3=end) using pre-resolved chapter bounds."""
     tape_stem = tape_log_dir.name.replace("-log", "")
-    clip_prefix = f"{tape_stem}_{clip.idx}_{safe_title}"
 
-    for sub_idx, (s_sec, e_sec, _) in enumerate(segments, start=1):
-        mid_sec = s_sec + ((e_sec - s_sec) / 2.0)
-        end_sec = max(s_sec, e_sec - 0.1)
+    for sub_tag, sub_title, s_sec, e_sec in chapter_targets:
+        duration = max(0.1, e_sec - s_sec)
+        mid_sec = s_sec + (duration / 2.0)
+        end_sec = max(s_sec, e_sec - 0.2)
+
         timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
 
+        if hasattr(clip, "subchapters") and clip.subchapters:
+            snapshot_prefix = f"{tape_stem}_{sub_tag}_{sub_title}"
+        else:
+            snapshot_prefix = f"{tape_stem}_{clip.idx}_{sub_title}"
+
         for pos_code, t_sec in timestamps:
-            snapshot_prefix = f"{clip_prefix}_{sub_idx}-{pos_code}"
+            frame_stem = f"{snapshot_prefix}_{pos_code}"
 
             if cfg.do_uncropped:
-                out_png = tape_log_dir / f"{snapshot_prefix}a.png"
+                out_png = tape_log_dir / f"{frame_stem}a.png"
                 cmd = [
                     "ffmpeg", "-y", "-loglevel", "warning",
-                    "-ss", str(t_sec), "-i", str(mkv_path),
+                    "-ss", f"{t_sec:.3f}", "-i", str(mkv_path),
                     "-vf", "format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)
                 ]
@@ -179,10 +183,10 @@ def capture_diagnostic_frames(
                     subprocess.run(cmd, stdout=log_file, stderr=log_file, check=True)
 
             if cfg.do_cropped and ffmpeg_crop:
-                out_png = tape_log_dir / f"{snapshot_prefix}b.png"
+                out_png = tape_log_dir / f"{frame_stem}b.png"
                 cmd = [
                     "ffmpeg", "-y", "-loglevel", "warning",
-                    "-ss", str(t_sec), "-i", str(mkv_path),
+                    "-ss", f"{t_sec:.3f}", "-i", str(mkv_path),
                     "-vf", f"{ffmpeg_crop},format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)
                 ]
@@ -190,8 +194,7 @@ def capture_diagnostic_frames(
                     single_script_lines.append(" ".join(shlex.quote(c) for c in cmd) + "\n")
                 else:
                     subprocess.run(cmd, stdout=log_file, stderr=log_file, check=True)
-
-
+                    
 def process_clip_pipeline(
     clip,
     pipe: dict,
@@ -299,6 +302,7 @@ def main():
         for clip in data.clips:
             clip_start_time = time.perf_counter()
             segments = resolve_subsegments(clip, total_duration_sec)
+            chapter_targets = resolve_clip_subchapters(clip, segments, total_duration_sec)
 
             safe_title = (
                 "".join(
@@ -321,7 +325,7 @@ def main():
                 )
                 capture_diagnostic_frames(
                     clip,
-                    segments,
+                    chapter_targets,
                     mkv_path,
                     tape_log_dir,
                     ffmpeg_crop,
