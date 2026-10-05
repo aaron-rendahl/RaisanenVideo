@@ -5,3 +5,4 @@
 .DS_Store
 token.json
 youtube_secrets.json
+__pycache__
