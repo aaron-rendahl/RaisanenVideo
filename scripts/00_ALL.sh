@@ -41,6 +41,9 @@ if false; then
   ffprobe -v error -show_entries format_tags -of json $VID01
   ## check cropping metadata
   mkvinfo $VID01 | grep -i crop
+  ## check per clip metadata
+  ffprobe -v quiet -print_format json -show_chapters "$VID01" | less
+
 fi
 
 ## ---------------------------------------------
