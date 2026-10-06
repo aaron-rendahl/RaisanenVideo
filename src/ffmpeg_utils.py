@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import List, Tuple
 from models import Clip
 
+from video_utils import has_audio_stream
+
 def build_crop_filter(crop_str: str) -> str:
     """Translates 'Left Right Top Bottom' crop boundaries to FFmpeg crop filter strings."""
     if not crop_str:
@@ -171,9 +173,9 @@ def build_clip_pipeline(
 
     stage1_cmd.extend(
         [
+            "-map_chapters", "-1",
             "-c:v", "utvideo",
             "-c:a", "pcm_s16le",
-            "-ch_layout", "stereo",
             tmp_mkv,
         ]
     )
@@ -181,10 +183,12 @@ def build_clip_pipeline(
     # Stage 2 remains untouched as Stage 1 guarantees a valid stereo audio track
     stage2_cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
+        "-channel_layout", "stereo",
         "-i", tmp_mkv,
         "-i", str(meta_file_path),
         "-i", str(vtt_file_path),
         "-map_metadata", "1",
+        "-map_chapters", "1",
         "-map", "0:v",
         "-map", "0:a",
         "-map", "2:s",

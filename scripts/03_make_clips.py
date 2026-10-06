@@ -65,7 +65,7 @@ sys.path.insert(0, str(SRC_DIR))
 
 # Import execution helpers from sidecar module
 from mkv_reader import read_mkv_metadata
-from video_duration import get_video_duration
+from video_utils import get_video_duration
 from ffmpeg_utils import (
     build_clip_pipeline,
     build_crop_filter,
