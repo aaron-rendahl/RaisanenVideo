@@ -263,9 +263,12 @@ def process_clip_pipeline(
         # Resolve ${VAR} placeholders to concrete paths right before running
         s1_args = resolve_cmd_args(pipe["stage1"], pipe["paths"])
         s2_args = resolve_cmd_args(pipe["stage2"], pipe["paths"])
-
+        s3_args = resolve_cmd_args(pipe["stage3"], pipe["paths"])
+        
         subprocess.run(s1_args, stdout=log_file, stderr=log_file, check=True)
         subprocess.run(s2_args, stdout=log_file, stderr=log_file, check=True)
+        subprocess.run(s3_args, stdout=log_file, stderr=log_file, check=True)
+        shutil.move(pipe["paths"]["MUX_MP4"], pipe["paths"]["OUT_MP4"])
 
 def main():
     register_cleanup_signals()

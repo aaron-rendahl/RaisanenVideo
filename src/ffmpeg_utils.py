@@ -112,8 +112,9 @@ def build_clip_pipeline(
     do_test: bool,
     clip_id: str,
 ) -> dict:
-    """Constructs two-stage FFmpeg pipeline commands with parameter placeholders."""
+    """Constructs three-stage FFmpeg pipeline commands with parameter placeholders."""
     tmp_mkv = f"/tmp/stage1_{clip_id}_{mkv_path.stem}.mkv"
+    mux_tmp = str(output_mp4.parent / f".tmp_{output_mp4.name}")
     has_audio = has_audio_stream(mkv_path)
 
     paths = {
@@ -122,8 +123,10 @@ def build_clip_pipeline(
         "META_TXT": str(meta_file_path),
         "VTT_SUB": str(vtt_file_path),
         "OUT_MP4": str(output_mp4),
+        "MUX_MP4": mux_tmp,
     }
 
+    # --- STAGE 1: Unchanged (Deinterlace, Trim, Concat -> UtVideo/PCM) ---
     stage1_cmd = ["ffmpeg", "-y", "-loglevel", "warning", "-i", "${SRC_MKV}"]
 
     if is_gapped or len(segments) > 1:
@@ -192,36 +195,48 @@ def build_clip_pipeline(
         ]
     )
 
+    # --- STAGE 2: Video/Audio Encode Only (Heavy CPU Work -> RAW MP4) ---
     stage2_cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
         "-channel_layout", "stereo",
         "-i", "${TMP_MKV}",
-        "-i", "${META_TXT}",
-        "-i", "${VTT_SUB}",
-        "-map_metadata", "1",
-        "-map_chapters", "1",
         "-map", "0:v",
         "-map", "0:a",
-        "-map", "2:s",
         "-c:v", "libx264",
         "-crf", "18",
         "-preset", "slow",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
+        "${OUT_MP4}",
+    ]
+
+    # --- STAGE 3: Fast Metadata & Subtitle Multiplexing (-c copy) ---
+    stage3_cmd = [
+        "ffmpeg", "-y", "-loglevel", "warning",
+        "-i", "${OUT_MP4}",
+        "-i", "${META_TXT}",
+        "-i", "${VTT_SUB}",
+        "-map", "0:v",
+        "-map", "0:a",
+        "-map", "2:s",
+        "-map_metadata", "1",
+        "-map_chapters", "1",
+        "-c:v", "copy",
+        "-c:a", "copy",
         "-c:s", "mov_text",
         "-metadata:s:0", "language=eng",
         "-disposition:s:0", "default",
         "-movflags", "+faststart",
-        "${OUT_MP4}",
+        "${MUX_MP4}",
     ]
 
     return {
         "stage1": stage1_cmd,
         "stage2": stage2_cmd,
+        "stage3": stage3_cmd,
         "paths": paths,
     }
-
 
 def format_cmd_tokens(cmd: list) -> str:
     """Groups FFmpeg flags with their arguments into readable multi-line shell commands, avoiding double-quoting bash variables."""
@@ -269,9 +284,8 @@ def resolve_cmd_args(cmd_template: List[str], paths: dict) -> List[str]:
             resolved.append(token)
     return resolved
 
-
 def format_pipeline_to_bash(pipeline: dict) -> str:
-    """Formats two-stage FFmpeg pipeline into clean multiline bash script syntax with header variables."""
+    """Formats three-stage FFmpeg pipeline into clean multiline bash script syntax with header variables."""
     paths = pipeline["paths"]
 
     var_header = [
@@ -280,17 +294,23 @@ def format_pipeline_to_bash(pipeline: dict) -> str:
         f'META_TXT={shlex.quote(paths["META_TXT"])}',
         f'VTT_SUB={shlex.quote(paths["VTT_SUB"])}',
         f'OUT_MP4={shlex.quote(paths["OUT_MP4"])}',
-        "",
+        f'MUX_MP4={shlex.quote(paths["MUX_MP4"])}',
+        "\n",
     ]
 
     s1_str = format_cmd_tokens(pipeline["stage1"])
     s2_str = format_cmd_tokens(pipeline["stage2"])
+    s3_str = format_cmd_tokens(pipeline["stage3"])
 
-    script_body = f"{s1_str}\n\n{s2_str}\n\nrm -f \"${{TMP_MKV}}\""
+    script_body = (
+        f"{s1_str}\n\n"
+        f"{s2_str}\n\n"
+        f'rm -f "${{TMP_MKV}}"\n\n'
+        f"{s3_str}\n\n"
+        f'mv -f "${{MUX_MP4}}" "${{OUT_MP4}}"\n'
+    )
 
     return "\n".join(var_header) + script_body
-
-
 
 def clean_directory(
     target_dir: Path,
