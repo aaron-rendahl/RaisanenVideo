@@ -8,3 +8,4 @@ youtube_secrets.json
 __pycache__
 *.mpg
 *.mkv
+*.mp4
