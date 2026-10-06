@@ -162,19 +162,19 @@ def capture_diagnostic_frames(
     if debug:
         print(f"\n  [DEBUG] Clip [{getattr(clip, 'idx', '?')}] '{getattr(clip, 'title', '')}' has {len(chapter_targets)} subchapter target(s):")
 
-    for sub_tag, sub_title, s_sec, e_sec in chapter_targets:
+    for sub_tag, display_title, safe_title, s_sec, e_sec in chapter_targets:
         duration = max(0.1, e_sec - s_sec)
         mid_sec = s_sec + (duration / 2.0)
         end_sec = max(s_sec, e_sec - 0.2)
 
-        print(f"    -> Subchapter [{sub_tag}] '{sub_title}': start={s_sec:.3f}s, mid={mid_sec:.3f}s, end={end_sec:.3f}s (dur={duration:.1f}s)")
+        print(f"    -> Subchapter [{sub_tag}] '{display_title}': start={s_sec:.3f}s, mid={mid_sec:.3f}s, end={end_sec:.3f}s (dur={duration:.1f}s)")
 
         timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
 
         if hasattr(clip, "subchapters") and clip.subchapters:
-            snapshot_prefix = f"{tape_stem}_{sub_tag}_{sub_title}"
+            snapshot_prefix = f"{tape_stem}_{sub_tag}_{safe_title}"
         else:
-            snapshot_prefix = f"{tape_stem}_{clip.idx}_{sub_title}"
+            snapshot_prefix = f"{tape_stem}_{clip.idx}_{safe_title}"
 
         for pos_code, t_sec in timestamps:
             frame_stem = f"{snapshot_prefix}_{pos_code}"
