@@ -34,8 +34,17 @@ def generate_concat_ffmetadata(
 
     for start_sec, end_sec, title in segments:
         duration = 10.0 if is_test else max(0.1, end_sec - start_sec)
-        start_ms = int(current_time * 1000)
-        end_ms = int((current_time + duration) * 1000)
+        start_ms = int(round(current_time * 1000))
+        end_ms = int(round((current_time + duration) * 1000))
+
+        clean_title = (
+            str(title)
+            .replace("\\", "\\\\")
+            .replace("=", "\\=")
+            .replace(";", "\\;")
+            .replace("#", "\\#")
+            .replace("\n", "\\\n")
+        )
 
         lines.extend(
             [
@@ -43,7 +52,7 @@ def generate_concat_ffmetadata(
                 "TIMEBASE=1/1000",
                 f"START={start_ms}",
                 f"END={end_ms}",
-                f"title={title}",
+                f"title={clean_title}",
             ]
         )
         current_time += duration
