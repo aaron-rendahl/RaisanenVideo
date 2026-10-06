@@ -1,0 +1,4 @@
+go back and make the 8mm mkv run at the correct speed
+add chapters and cropping info to mkv
+get script to extract chapter and cropping info and can rebuild cuts
+figure out where and how files will be archived and shared
