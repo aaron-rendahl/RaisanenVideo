@@ -6,3 +6,5 @@
 token.json
 youtube_secrets.json
 __pycache__
+*.mpg
+*.mkv
