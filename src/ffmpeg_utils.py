@@ -104,10 +104,10 @@ def build_clip_pipeline(
     do_test: bool,
     clip_id: str,
 ) -> dict:
-    """Constructs the two-stage FFmpeg pipeline arguments and temporary MKV path."""
+    """Constructs two-stage FFmpeg pipeline, adding silent audio if input lacks an audio track."""
     tmp_mkv = f"/tmp/stage1_{clip_id}_{mkv_path.stem}.mkv"
+    has_audio = has_audio_stream(mkv_path)
 
-    # Stage 1: Fast intermediate extraction to UtVideo/PCM
     stage1_cmd = ["ffmpeg", "-y", "-loglevel", "warning", "-i", str(mkv_path)]
 
     if is_gapped or len(segments) > 1:
@@ -117,13 +117,18 @@ def build_clip_pipeline(
         for idx, (s_sec, e_sec, _) in enumerate(segments):
             dur = 10.0 if do_test else (e_sec - s_sec)
 
+            if has_audio:
+                audio_filter = f"[0:a]atrim=start={s_sec}:duration={dur},asetpts=PTS-STARTPTS[a{idx}]"
+            else:
+                # Generate synthetic silent stereo audio matching segment duration
+                audio_filter = f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={dur},asetpts=PTS-STARTPTS[a{idx}]"
+
             filter_complex_parts.append(
                 f"[0:v]trim=start={s_sec}:duration={dur},{vf_base}[v{idx}];\n"
-                f"[0:a]atrim=start={s_sec}:duration={dur},asetpts=PTS-STARTPTS[a{idx}]"
+                f"{audio_filter}"
             )
             concat_inputs.append(f"[v{idx}][a{idx}]")
 
-        # Multi-line filter complex: join segments with ';\n', add ';', then pads + concat filter
         fc_str = (
             ";\n".join(filter_complex_parts)
             + ";\n"
@@ -141,13 +146,28 @@ def build_clip_pipeline(
     else:
         s_sec, e_sec, _ = segments[0]
         dur = 10.0 if do_test else (e_sec - s_sec)
-        stage1_cmd.extend(
-            [
-                "-ss", str(s_sec),
-                "-t", str(dur),
-                "-vf", vf_base,  # Fixed typo: f_base -> vf_base
-            ]
-        )
+
+        if has_audio:
+            stage1_cmd.extend(
+                [
+                    "-ss", str(s_sec),
+                    "-t", str(dur),
+                    "-vf", vf_base,
+                ]
+            )
+        else:
+            # Single-segment silent audio generation
+            fc_str = (
+                f"[0:v]trim=start={s_sec}:duration={dur},{vf_base}[outv];\n"
+                f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={dur},asetpts=PTS-STARTPTS[outa]"
+            )
+            stage1_cmd.extend(
+                [
+                    "-filter_complex", fc_str,
+                    "-map", "[outv]",
+                    "-map", "[outa]",
+                ]
+            )
 
     stage1_cmd.extend(
         [
@@ -158,7 +178,7 @@ def build_clip_pipeline(
         ]
     )
 
-    # Stage 2: Encode web-ready H.264/AAC MP4 with dual chapter sidecars
+    # Stage 2 remains untouched as Stage 1 guarantees a valid stereo audio track
     stage2_cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
         "-i", tmp_mkv,
