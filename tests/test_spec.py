@@ -5,6 +5,7 @@ Unit tests verifying spec_reader.py and spec_writer.py against
 actual multi-clip and single-clip tape spec conventions.
 """
 
+import pytest
 import textwrap
 from models import ArchiveData
 from spec_reader import read_tape_spec
@@ -151,3 +152,15 @@ def test_spec_roundtrip_writing():
     assert len(recreated_spec_text.strip()) > 0
     reparsed_data = read_tape_spec(recreated_spec_text)
     assert len(reparsed_data.clips) == len(parsed_data.clips)
+
+
+def test_spec_reader_conflicting_title_and_dotted_subchapters_error():
+    """Verifies that combining top-level TITLE with dotted subchapters raises a ValueError."""
+    spec_text = textwrap.dedent("""
+        TITLE = Raisanen 1987 Tape A
+        01 | 00:00:02.336 | 00:06:02.696 | First Videos
+        01.01 | 00:00:02.336 | 00:00:51.184 | Sandy in kitchen
+    """)
+
+    with pytest.raises(ValueError, match="cannot be combined with dotted subchapter indices"):
+        read_tape_spec(spec_text)

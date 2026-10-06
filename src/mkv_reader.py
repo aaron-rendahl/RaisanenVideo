@@ -1,48 +1,63 @@
-# src/mkv_reader.py
-
 import subprocess
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from models import ArchiveData, Clip, Subchapter
 
 
-def read_mkv_metadata(mkv_path: str) -> ArchiveData:
-    """Extracts native Matroska Chapters and Tags XML directly via mkvextract.
-
-    Supports both multi-clip nested parent/child hierarchies and single-clip top-level subchapters.
+def read_mkv_metadata(mkv_path: str | Path) -> ArchiveData:
+    """Subprocess I/O wrapper: extracts raw XML chapter/tag strings from an MKV file
+    and delegates parsing to parse_mkv_xml_strings.
     """
-    chap_cmd = ["mkvextract", "chapters", mkv_path]
-    chap_res = subprocess.run(chap_cmd, capture_output=True, text=True, check=True)
+    mkv_path = Path(mkv_path)
+    if not mkv_path.exists():
+        raise FileNotFoundError(f"MKV file not found: {mkv_path}")
 
-    tags_cmd = ["mkvextract", "tags", mkv_path]
-    tags_res = subprocess.run(tags_cmd, capture_output=True, text=True, check=True)
+    # Call mkvextract to extract chapters XML
+    chapters_cmd = ["mkvextract", "chapters", str(mkv_path)]
+    chapters_xml = subprocess.check_output(chapters_cmd, text=True)
 
+    # Call mkvextract to extract tags XML
+    tags_cmd = ["mkvextract", "tags", str(mkv_path)]
+    tags_xml = subprocess.check_output(tags_cmd, text=True)
+
+    # Delegate data reconstruction to the pure parser
+    return parse_mkv_xml_strings(chapters_xml, tags_xml)
+
+
+def parse_mkv_xml_strings(chapters_xml: str, tags_xml: str) -> ArchiveData:
+    """Pure data processing: parses raw Matroska XML strings for chapters and tags
+    and reconstructs the domain ArchiveData model without sub-process dependencies.
+    """
+    chapter_tags = {}
     global_crop = ""
-    chapter_tags = {}  # chap_uid -> {"crop": ..., "date": ...}
 
-    if tags_res.stdout.strip():
-        tags_root = ET.fromstring(tags_res.stdout)
+    # 1. Parse Tags XML
+    if tags_xml and tags_xml.strip():
+        tags_root = ET.fromstring(tags_xml)
         for tag in tags_root.findall("Tag"):
-            chap_uid = tag.findtext("Targets/ChapterUID")
-            crop_val = ""
-            date_val = ""
-
+            targets = tag.find("Targets")
+            chap_uid = targets.findtext("ChapterUID") if targets is not None else None
+            
+            tag_dict = {}
             for simple in tag.findall("Simple"):
-                name = simple.findtext("Name")
-                string_val = simple.findtext("String")
-                if name == "CROPPING":
-                    crop_val = string_val
-                elif name == "DATE_RECORDED":
-                    date_val = string_val
+                name = simple.findtext("Name", "").upper()
+                val = simple.findtext("String", "")
+                if name in ("CROP", "CROPPING", "GLOBAL_CROP"):
+                    tag_dict["crop"] = val
+                elif name in ("DATE", "DATE_RECORDED", "DATE_RELEASED", "GLOBAL_DATE"):
+                    tag_dict["date"] = val
 
             if chap_uid:
-                chapter_tags[chap_uid] = {"crop": crop_val, "date": date_val}
+                chapter_tags[chap_uid] = tag_dict
             else:
-                if crop_val:
-                    global_crop = crop_val
+                # Global tags
+                if "crop" in tag_dict:
+                    global_crop = tag_dict["crop"]
 
+    # 2. Parse Chapters XML
     clips = []
-    if chap_res.stdout.strip():
-        chap_root = ET.fromstring(chap_res.stdout)
+    if chapters_xml and chapters_xml.strip():
+        chap_root = ET.fromstring(chapters_xml)
         edition = chap_root.find("EditionEntry")
 
         if edition is not None:
@@ -58,20 +73,16 @@ def read_mkv_metadata(mkv_path: str) -> ArchiveData:
 
                 subchapters = []
                 for s_idx, child_atom in enumerate(child_atoms, start=1):
-                    s_uid = child_atom.findtext("ChapterUID")
                     s_title = child_atom.findtext("ChapterDisplay/ChapterString", f"Subchapter {s_idx}")
                     s_start = child_atom.findtext("ChapterTimeStart", "00:00:00.000000000")
                     s_end = child_atom.findtext("ChapterTimeEnd", "")
-                    s_tag_data = chapter_tags.get(s_uid, {})
 
                     subchapters.append(
                         Subchapter(
-                            idx=f"{s_idx:02d}",
+                            idx=f"{c_idx:02d}.{s_idx:02d}",
                             start=s_start[:12],
                             end=s_end[:12] if s_end else "",
                             title=s_title,
-                            crop=s_tag_data.get("crop", ""),
-                            date=s_tag_data.get("date", ""),
                         )
                     )
 

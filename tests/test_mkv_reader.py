@@ -1,18 +1,14 @@
-"""
-tests/test_mkv_reader.py
+"""tests/test_mkv_reader.py
 
-Unit tests for mkv_reader.py using mocked ffprobe JSON payloads.
+Unit tests for mkv_reader.py XML parsing.
 """
 
-import json
 import textwrap
-from unittest.mock import MagicMock, patch
-from mkv_reader import read_mkv_metadata
+from mkv_reader import parse_mkv_xml_strings
 
 
-@patch("subprocess.run")
-def test_read_mkv_metadata_parses_mkvextract_xml(mock_run):
-    """Verifies that read_mkv_metadata correctly extracts chapters and tags from mkvextract XML output."""
+def test_read_mkv_metadata_parses_mkvextract_xml():
+    """Verifies that parse_mkv_xml_strings extracts chapters and tags from raw XML strings."""
     chapters_xml = textwrap.dedent("""
         <Chapters>
           <EditionEntry>
@@ -44,7 +40,7 @@ def test_read_mkv_metadata_parses_mkvextract_xml(mock_run):
             </Targets>
             <Simple>
               <Name>CROPPING</Name>
-              <String>12|24|0|8</String>
+              <String>12 24 0 8</String>
             </Simple>
           </Tag>
           <Tag>
@@ -60,19 +56,9 @@ def test_read_mkv_metadata_parses_mkvextract_xml(mock_run):
         </Tags>
     """)
 
-    def side_effect(cmd, **kwargs):
-        cmd_str = " ".join(cmd)
-        if "chapters" in cmd_str:
-            return MagicMock(stdout=chapters_xml, returncode=0)
-        elif "tags" in cmd_str:
-            return MagicMock(stdout=tags_xml, returncode=0)
-        return MagicMock(stdout="", returncode=0)
+    data = parse_mkv_xml_strings(chapters_xml, tags_xml)
 
-    mock_run.side_effect = side_effect
-
-    data = read_mkv_metadata("dummy_archive.mkv")
-
-    assert data.global_crop == "12|24|0|8"
+    assert data.global_crop == "12 24 0 8"
     assert len(data.clips) == 2
     assert data.clips[0].title == "Arrival"
     assert data.clips[0].date == "1987-09-19"

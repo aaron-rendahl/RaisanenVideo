@@ -81,13 +81,8 @@ def read_tape_spec(text_content: str) -> ArchiveData:
         idx = parts[0]
         is_timestamp_line = len(parts) > 1 and ":" in parts[1]
 
-        # Case A: Subchapters under top-level TITLE or parent clip
-        if tape_title and is_timestamp_line:
-            s_time, e_time, sub_title = parse_timestamp_line(parts)
-            sub = Subchapter(idx=idx, start=s_time, end=e_time, title=sub_title)
-            current_clip.subchapters.append(sub)
-
-        elif "." in idx:
+        # 1. Dotted indices (e.g., 01.01, 01.02) are ALWAYS Subchapters
+        if "." in idx:
             s_time, e_time, sub_title = parse_timestamp_line(parts)
             sub = Subchapter(idx=idx, start=s_time, end=e_time, title=sub_title)
             if current_clip:
@@ -97,7 +92,14 @@ def read_tape_spec(text_content: str) -> ArchiveData:
                     f"Line {line_num}: Subchapter {idx} found before parent clip."
                 )
 
-        # Case B: Multi-clip mode parent headers or standalone clips
+        # 2. Master Tape Mode (when top-level TITLE is present):
+        # All non-dotted indices (01, 02) become Subchapters under MASTER
+        elif tape_title:
+            s_time, e_time, sub_title = parse_timestamp_line(parts)
+            sub = Subchapter(idx=idx, start=s_time, end=e_time, title=sub_title)
+            current_clip.subchapters.append(sub)
+
+        # 3. Multi-Clip Mode: Parent header WITH timestamps (e.g., "01 | 00:00:02 | 00:06:02 | Title")
         elif is_timestamp_line:
             idx_num = idx if idx.isdigit() else f"{len(clips)+1:02d}"
             s_time, e_time, title = parse_timestamp_line(parts)
@@ -114,6 +116,8 @@ def read_tape_spec(text_content: str) -> ArchiveData:
                 crop=clip_crop,
             )
             clips.append(current_clip)
+
+        # 4. Multi-Clip Mode: Parent header WITHOUT timestamps (e.g., "01 | First Videos | crop= 26 10 8 8")
         else:
             idx_num = idx if idx.isdigit() else f"{len(clips)+1:02d}"
             title = parts[1] if len(parts) > 1 else parts[0]
@@ -150,6 +154,14 @@ def read_tape_spec(text_content: str) -> ArchiveData:
         if clip.subchapters:
             clip.start = clip.subchapters[0].start
             clip.end = clip.subchapters[-1].end
+
+    # Validation check at the end of read_tape_spec()
+    if tape_title and any('.' in sub.idx for clip in clips for sub in clip.subchapters):
+        raise ValueError(
+            "Invalid spec: 'TITLE' (Single-Clip MASTER mode) cannot be combined with "
+            "dotted subchapter indices like '01.01'."
+            "Remove 'TITLE' for multi-clip mode or use flat integer indices ('01', '02')."
+        )
 
     return ArchiveData(
         global_crop=global_crop,
