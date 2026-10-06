@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FFmpeg Chapter & Video Pipeline Architecture</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --border: #334155;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #38bdf8;
+            --accent-green: #4ade80;
+            --accent-amber: #fbbf24;
+            --code-bg: #090d16;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            margin: 0;
+            padding: 2rem;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+
+        header {
+            margin-bottom: 2.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 1rem;
+        }
+
+        h1 {
+            font-size: 1.875rem;
+            font-weight: 700;
+            color: var(--text-main);
+            margin: 0 0 0.5rem 0;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin: 0;
+        }
+
+        .step-card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .step-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            margin-right: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-1 { background-color: rgba(251, 191, 36, 0.15); color: var(--accent-amber); border: 1px solid var(--accent-amber); }
+        .badge-2 { background-color: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid var(--accent-blue); }
+        .badge-3 { background-color: rgba(74, 222, 128, 0.15); color: var(--accent-green); border: 1px solid var(--accent-green); }
+
+        .step-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        ul {
+            margin: 0 0 1rem 0;
+            padding-left: 1.25rem;
+            color: var(--text-main);
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .code-block {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.75rem 1rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.875rem;
+            color: #e2e8f0;
+            overflow-x: auto;
+        }
+
+        .note {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            border-left: 3px solid var(--border);
+            padding-left: 0.75rem;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>FFmpeg Video Pipeline Architecture</h1>
+            <p class="subtitle">The 3 Core Moving Parts of Native QuickTime & Multi-Player Chapter Processing</p>
+        </header>
+
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge badge-1">Part 1</span>
+                <h2 class="step-title">Sidecar Asset Creation</h2>
+            </div>
+            <p>Before video encoding starts, the setup phase reads chapter definitions and generates two synchronized text sidecar files in the per-clip log directory (<code>02_clips/Raisanen-1987a-log/</code>):</p>
+            <ul>
+                <li><strong><code>meta_01.txt</code> (FFmpeg Metadata):</strong> Standard <code>;FFMETADATA1</code> structure. FFmpeg uses this to write ISO global container chapters (<code>chpl</code> atom) for VLC, IINA, and <code>ffprobe</code>.</li>
+                <li><strong><code>meta_01.vtt</code> (WebVTT Format):</strong> Standard timed text syntax (<code>00:00:00.000 --> 00:00:10.000</code>). FFmpeg encodes this stream directly as 3GPP MOV text (<code>-c:s mov_text</code>) so macOS QuickLook and QuickTime Player construct native track reference bindings (<code>tref</code>).</li>
+            </ul>
+        </div>
+
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge badge-2">Part 2</span>
+                <h2 class="step-title">Stage 1: Pre-trim & Intermediate MKV</h2>
+            </div>
+            <p>Decodes raw analog transfers, applies precise frame seeking (<code>-ss</code> / <code>-to</code>), and runs required audio/video filtering chains (e.g., <code>yadif</code> deinterlacing or crop adjustments).</p>
+            <ul>
+                <li><strong>Lossless Intermediate:</strong> Encodes output to <code>/tmp/stage1_&lt;clip_id&gt;.mkv</code> using <code>-c:v utvideo -c:a pcm_s16le</code>.</li>
+                <li><strong>Architectural Purpose:</strong> Isolates heavy filtering/seeking from compressed delivery encoding. Prevents pipeline stalls, timestamp drift, and memory pipe crashes during downstream MP4 muxing.</li>
+            </ul>
+        </div>
+
+        <div class="step-card">
+            <div class="step-header">
+                <span class="step-badge badge-3">Part 3</span>
+                <h2 class="step-title">Stage 2: Final Encode & Dual Chapter Muxing</h2>
+            </div>
+            <p>Reads the intermediate file (<code>/tmp/stage1_&lt;clip_id&gt;.mkv</code>) along with both pre-generated sidecar files to produce the delivery MP4.</p>
+            <ul>
+                <li><strong>Audio Handling:</strong> Passes <code>-channel_layout stereo</code> explicitly to suppress automatic layout guessing warnings on raw PCM inputs.</li>
+                <li><strong>Encoding:</strong> Generates distribution-grade H.264 video (<code>-c:v libx264 -crf 22</code>) and AAC audio (<code>-c:a aac -b:a 192k</code>).</li>
+                <li><strong>Dual Muxing:</strong> Muxes global ISO container metadata via <code>-map_chapters 1</code> while simultaneously encoding stream <code>2:s:0</code> as <code>-c:s mov_text</code>, creating universal native chapter playback across macOS QuickTime, Finder QuickLook, VLC, and IINA.</li>
+            </ul>
+            <div class="code-block">
+                <strong>Output Target:</strong> <code>02_clips/Raisanen-1987a/Raisanen-1987a_01_First_Videos.mp4</code>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
