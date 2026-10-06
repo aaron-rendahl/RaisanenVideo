@@ -34,7 +34,7 @@ $PYTHON $SCRIPT_DIR/02_embed_metadata.py $VID
 if false; then
   VID01="$ARCHIVE_DIR/$VID.mkv"
   ## check chapters
-  mkvextract chapters "$VID01" | xmllint --format - | less
+  mkvextract chapters "$VID01" | xmllint --format - > test.xml
   ## check global title
   ffprobe -v error -show_entries format_tags=title -of default=noprint_wrappers=1 $VID01
   ## check global tags
@@ -50,8 +50,25 @@ fi
 ## 3) CREATE CLIPS
 
 if false; then
+  ## Check that timestamps are correct
   $SCRIPT_DIR/03_make_clips.py --uncropped-frames $VID
-  $SCRIPT_DIR/03_make_clips.py --frames-only $VID
+  ## Check that cropping is correct
+  $SCRIPT_DIR/03_make_clips.py --cropped-frames $VID
+  ## Clean up
+  $SCRIPT_DIR/03_make_clips.py --clean $VID
+
+  ## optionally make test versions
+  $SCRIPT_DIR/03_make_clips.py --test $VID
+
+  ## optionally make test scripts
+  $SCRIPT_DIR/03_make_clips.py --script $VID
+  $SCRIPT_DIR/03_make_clips.py --split-scripts $VID
+
+  ## or just run them all!
+  $SCRIPT_DIR/03_make_clips.py $VID
+
+  ## and clean the logs/scripts/pngs
+  $SCRIPT_DIR/03_make_clips.py --clean $VID
 fi
 
 
