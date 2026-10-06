@@ -41,7 +41,7 @@ Flags:
 Directory Structure:
   Input Archival:     01_archive/<TAPE_NAME>.mkv
   Output Clips:       02_clips/<TAPE_NAME>/<TAPE_NAME>_<CLIP_IDX>_<TITLE>.mp4
-  Diagnostics & Log:  02_clips/<TAPE_NAME>-log/ (contains meta_XX.txt, meta_XX.vtt, logs, scripts)
+  Diagnostics & Log:  04_logs/<TAPE_NAME>/ (contains meta_XX.txt, meta_XX.vtt, logs, scripts)
 """
 
 import os
@@ -58,6 +58,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 ARCHIVE_DIR = BASE_DIR / "01_archive"
 CLIPS_DIR = BASE_DIR / "02_clips"
+LOGS_DIR = BASE_DIR / "04_logs"
 SRC_DIR = BASE_DIR / "src"
 
 # Add src/ to sys.path for mkv_reader and video_duration imports
@@ -276,7 +277,8 @@ def main():
 
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     tape_output_dir = CLIPS_DIR / cfg.tape_name
-    tape_log_dir = CLIPS_DIR / f"{cfg.tape_name}-log"
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    tape_log_dir = LOGS_DIR / cfg.tape_name
 
     if cfg.do_clean:
         if tape_log_dir.exists():
