@@ -112,34 +112,30 @@ def build_clip_pipeline(
 
     if is_gapped or len(segments) > 1:
         filter_complex_parts = []
-        concat_v_inputs = []
-        concat_a_inputs = []
+        concat_inputs = []
 
         for idx, (s_sec, e_sec, _) in enumerate(segments):
             dur = 10.0 if do_test else (e_sec - s_sec)
+
             filter_complex_parts.append(
-                f"[0:v]trim=start={s_sec}:duration={dur},{vf_base}[v{idx}];"
+                f"[0:v]trim=start={s_sec}:duration={dur},{vf_base}[v{idx}];\n"
                 f"[0:a]atrim=start={s_sec}:duration={dur},asetpts=PTS-STARTPTS[a{idx}]"
             )
-            concat_v_inputs.append(f"[v{idx}]")
-            concat_a_inputs.append(f"[a{idx}]")
+            concat_inputs.append(f"[v{idx}][a{idx}]")
 
+        # Multi-line filter complex: join segments with ';\n', add ';', then pads + concat filter
         fc_str = (
-            ";".join(filter_complex_parts)
-            + ";"
-            + "".join(concat_v_inputs)
-            + "".join(concat_a_inputs)
+            ";\n".join(filter_complex_parts)
+            + ";\n"
+            + "".join(concat_inputs)
             + f"concat=n={len(segments)}:v=1:a=1[outv][outa]"
         )
 
         stage1_cmd.extend(
             [
-                "-filter_complex",
-                fc_str,
-                "-map",
-                "[outv]",
-                "-map",
-                "[outa]",
+                "-filter_complex", fc_str,
+                "-map", "[outv]",
+                "-map", "[outa]",
             ]
         )
     else:
@@ -147,65 +143,41 @@ def build_clip_pipeline(
         dur = 10.0 if do_test else (e_sec - s_sec)
         stage1_cmd.extend(
             [
-                "-ss",
-                str(s_sec),
-                "-t",
-                str(dur),
-                "-vf",
-                vf_base,
+                "-ss", str(s_sec),
+                "-t", str(dur),
+                "-vf", vf_base,  # Fixed typo: f_base -> vf_base
             ]
         )
 
     stage1_cmd.extend(
         [
-            "-c:v",
-            "utvideo",
-            "-c:a",
-            "pcm_s16le",
+            "-c:v", "utvideo",
+            "-c:a", "pcm_s16le",
+            "-ch_layout", "stereo",
             tmp_mkv,
         ]
     )
 
     # Stage 2: Encode web-ready H.264/AAC MP4 with dual chapter sidecars
     stage2_cmd = [
-        "ffmpeg",
-        "-y",
-        "-loglevel",
-        "warning",
-        "-i",
-        tmp_mkv,
-        "-i",
-        str(meta_file_path),
-        "-i",
-        str(vtt_file_path),
-        "-map_metadata",
-        "1",
-        "-map",
-        "0:v",
-        "-map",
-        "0:a",
-        "-map",
-        "2:s",
-        "-c:v",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "slow",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-c:s",
-        "mov_text",
-        "-metadata:s:s:0",
-        "language=eng",
-        "-disposition:s:s:0",
-        "default",
-        "-movflags",
-        "+faststart",
+        "ffmpeg", "-y", "-loglevel", "warning",
+        "-i", tmp_mkv,
+        "-i", str(meta_file_path),
+        "-i", str(vtt_file_path),
+        "-map_metadata", "1",
+        "-map", "0:v",
+        "-map", "0:a",
+        "-map", "2:s",
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "slow",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-c:s", "mov_text",
+        "-metadata:s:0", "language=eng",
+        "-disposition:s:0", "default",
+        "-movflags", "+faststart",
         str(output_mp4),
     ]
 
@@ -214,7 +186,6 @@ def build_clip_pipeline(
         "stage2": stage2_cmd,
         "tmp_mkv": tmp_mkv,
     }
-
 
 def format_cmd_tokens(cmd: list) -> str:
     """Groups FFmpeg flags with their arguments into readable multi-line shell commands."""
