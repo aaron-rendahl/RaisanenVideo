@@ -318,7 +318,8 @@ def main():
             clip_start_time = time.perf_counter()
             # Single source of truth for subchapter resolution
             chapter_targets = resolve_clip_subchapters(clip, total_duration_sec)
-
+            segments = resolve_subsegments(clip, total_duration_sec)
+            
             safe_title = (
                 "".join(
                     c if c.isalnum() or c in (" ", "-", "_") else ""
