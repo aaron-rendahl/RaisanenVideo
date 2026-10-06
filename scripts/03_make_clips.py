@@ -153,21 +153,25 @@ def capture_diagnostic_frames(
     cfg: CLIConfig,
     log_file,
     single_script_lines: list[str],
+    debug: bool = False,
 ) -> None:
-    """Captures diagnostic frame snapshots (1=start, 2=mid, 3=end) for all resolved subchapters/segments."""
+    """Captures diagnostic frame snapshots (1=start, 2=mid, 3=end) using pre-resolved chapter bounds."""
     tape_stem = tape_log_dir.name.replace("-log", "")
 
-    # Iterate over every subchapter tuple: (sub_tag, sub_title, start_sec, end_sec)
+    if debug:
+        print(f"\n  [DEBUG] Clip [{getattr(clip, 'idx', '?')}] '{getattr(clip, 'title', '')}' has {len(chapter_targets)} subchapter target(s):")
+
     for sub_tag, sub_title, s_sec, e_sec in chapter_targets:
         duration = max(0.1, e_sec - s_sec)
         mid_sec = s_sec + (duration / 2.0)
         end_sec = max(s_sec, e_sec - 0.2)
 
+        print(f"    -> Subchapter [{sub_tag}] '{sub_title}': start={s_sec:.3f}s, mid={mid_sec:.3f}s, end={end_sec:.3f}s (dur={duration:.1f}s)")
+
         timestamps = [("1", s_sec), ("2", mid_sec), ("3", end_sec)]
 
-        # Construct frame stem using clip index and subchapter tag
         if hasattr(clip, "subchapters") and clip.subchapters:
-            snapshot_prefix = f"{tape_stem}_{clip.idx}.{sub_tag}_{sub_title}"
+            snapshot_prefix = f"{tape_stem}_{sub_tag}_{sub_title}"
         else:
             snapshot_prefix = f"{tape_stem}_{clip.idx}_{sub_title}"
 
@@ -182,6 +186,8 @@ def capture_diagnostic_frames(
                     "-vf", "format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)
                 ]
+                if debug:
+                    print(f"       [RUN UNCROPPED] t={t_sec:.3f}s -> {out_png.name}")
                 if cfg.do_dry_run or cfg.do_split_scripts:
                     single_script_lines.append(" ".join(shlex.quote(c) for c in cmd) + "\n")
                 else:
@@ -195,6 +201,8 @@ def capture_diagnostic_frames(
                     "-vf", f"{ffmpeg_crop},format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)
                 ]
+                if debug:
+                    print(f"       [RUN CROPPED]   t={t_sec:.3f}s -> {out_png.name}")
                 if cfg.do_dry_run or cfg.do_split_scripts:
                     single_script_lines.append(" ".join(shlex.quote(c) for c in cmd) + "\n")
                 else:
