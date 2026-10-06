@@ -26,6 +26,7 @@ class ArchiveData:
     global_crop: str = ""
     global_date: str = ""
     raw_spec: str = ""
+    is_multi_clip: bool = False
     clips: List[Clip] = dataclasses.field(default_factory=list)
     warnings: List[str] = dataclasses.field(default_factory=list)
 
