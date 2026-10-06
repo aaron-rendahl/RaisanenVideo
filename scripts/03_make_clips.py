@@ -182,6 +182,7 @@ def capture_diagnostic_frames(
                 out_png = tape_log_dir / f"{frame_stem}a.png"
                 cmd = [
                     "ffmpeg", "-y", "-loglevel", "warning",
+                    "-apply_cropping", "0",
                     "-ss", f"{t_sec:.3f}", "-i", str(mkv_path),
                     "-vf", "format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)
@@ -197,6 +198,7 @@ def capture_diagnostic_frames(
                 out_png = tape_log_dir / f"{frame_stem}b.png"
                 cmd = [
                     "ffmpeg", "-y", "-loglevel", "warning",
+                    "-apply_cropping", "0",
                     "-ss", f"{t_sec:.3f}", "-i", str(mkv_path),
                     "-vf", f"{ffmpeg_crop},format=rgb24", "-vframes", "1", "-update", "1",
                     str(out_png)

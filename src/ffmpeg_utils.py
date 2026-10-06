@@ -8,14 +8,14 @@ from typing import List, Tuple
 from models import Clip
 
 def build_crop_filter(crop_str: str) -> str:
-    """Translates 'Top Bottom Left Right' crop boundaries to FFmpeg crop filter strings."""
+    """Translates 'Left Right Top Bottom' crop boundaries to FFmpeg crop filter strings."""
     if not crop_str:
         return ""
     try:
         delimiter = "|" if "|" in crop_str else " "
         parts = [int(p.strip()) for p in crop_str.split(delimiter) if p.strip()]
         if len(parts) == 4:
-            top, bottom, left, right = parts
+            left, right, top, bottom = parts
             return f"crop=iw-{left+right}:ih-{top+bottom}:{left}:{top}"
     except ValueError:
         pass
