@@ -34,6 +34,7 @@ $PYTHON $SCRIPT_DIR/02_embed_metadata.py $VID
 if false; then
   VID01="$ARCHIVE_DIR/$VID.mkv"
   ## check chapters
+  mkvextract chapters "$VID01" --simple
   mkvextract chapters "$VID01"
   ## check global title
   ffprobe -v error -show_entries format_tags=title -of default=noprint_wrappers=1 $VID01
