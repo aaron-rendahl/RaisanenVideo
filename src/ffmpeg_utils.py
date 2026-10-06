@@ -92,9 +92,6 @@ def convert_ffmetadata_to_vtt(meta_path: str, vtt_path: str) -> None:
 
     Path(vtt_path).write_text("\n".join(vtt_lines) + "\n", encoding="utf-8")
 
-
-
-
 def build_clip_pipeline(
     mkv_path: Path,
     output_mp4: Path,
@@ -106,11 +103,19 @@ def build_clip_pipeline(
     do_test: bool,
     clip_id: str,
 ) -> dict:
-    """Constructs two-stage FFmpeg pipeline, adding silent audio if input lacks an audio track."""
+    """Constructs two-stage FFmpeg pipeline commands with parameter placeholders."""
     tmp_mkv = f"/tmp/stage1_{clip_id}_{mkv_path.stem}.mkv"
     has_audio = has_audio_stream(mkv_path)
 
-    stage1_cmd = ["ffmpeg", "-y", "-loglevel", "warning", "-i", str(mkv_path)]
+    paths = {
+        "SRC_MKV": str(mkv_path),
+        "TMP_MKV": tmp_mkv,
+        "META_TXT": str(meta_file_path),
+        "VTT_SUB": str(vtt_file_path),
+        "OUT_MP4": str(output_mp4),
+    }
+
+    stage1_cmd = ["ffmpeg", "-y", "-loglevel", "warning", "-i", "${SRC_MKV}"]
 
     if is_gapped or len(segments) > 1:
         filter_complex_parts = []
@@ -122,7 +127,6 @@ def build_clip_pipeline(
             if has_audio:
                 audio_filter = f"[0:a]atrim=start={s_sec:.3f}:duration={dur:.3f},asetpts=PTS-STARTPTS[a{idx}]"
             else:
-                # Generate synthetic silent stereo audio matching segment duration
                 audio_filter = f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[a{idx}]"
 
             filter_complex_parts.append(
@@ -148,7 +152,7 @@ def build_clip_pipeline(
     else:
         s_sec, e_sec, _ = segments[0]
         dur = 10.0 if do_test else (e_sec - s_sec)
-        
+
         if has_audio:
             stage1_cmd.extend(
                 [
@@ -158,7 +162,6 @@ def build_clip_pipeline(
                 ]
             )
         else:
-            # Single-segment silent audio generation
             fc_str = (
                 f"[0:v]trim=start={s_sec:.3f}:duration={dur:.3f},{vf_base}[outv];\n"
                 f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={dur:.3f},asetpts=PTS-STARTPTS[outa]"
@@ -176,17 +179,16 @@ def build_clip_pipeline(
             "-map_chapters", "-1",
             "-c:v", "utvideo",
             "-c:a", "pcm_s16le",
-            tmp_mkv,
+            "${TMP_MKV}",
         ]
     )
 
-    # Stage 2 remains untouched as Stage 1 guarantees a valid stereo audio track
     stage2_cmd = [
         "ffmpeg", "-y", "-loglevel", "warning",
         "-channel_layout", "stereo",
-        "-i", tmp_mkv,
-        "-i", str(meta_file_path),
-        "-i", str(vtt_file_path),
+        "-i", "${TMP_MKV}",
+        "-i", "${META_TXT}",
+        "-i", "${VTT_SUB}",
         "-map_metadata", "1",
         "-map_chapters", "1",
         "-map", "0:v",
@@ -202,35 +204,37 @@ def build_clip_pipeline(
         "-metadata:s:0", "language=eng",
         "-disposition:s:0", "default",
         "-movflags", "+faststart",
-        str(output_mp4),
+        "${OUT_MP4}",
     ]
 
     return {
         "stage1": stage1_cmd,
         "stage2": stage2_cmd,
-        "tmp_mkv": tmp_mkv,
+        "paths": paths,
     }
 
+
 def format_cmd_tokens(cmd: list) -> str:
-    """Groups FFmpeg flags with their arguments into readable multi-line shell commands."""
+    """Groups FFmpeg flags with their arguments into readable multi-line shell commands, avoiding double-quoting bash variables."""
     lines = []
     i = 0
     current_line = []
 
     while i < len(cmd):
         token = cmd[i]
-        quoted = shlex.quote(token)
+        # Avoid escaping bash variables like ${SRC_MKV}
+        quoted = token if token.startswith("${") and token.endswith("}") else shlex.quote(token)
 
-        # Start a new line on major options or trailing positional output file
         if token.startswith("-") or i == len(cmd) - 1:
             if current_line:
                 lines.append("  " + " ".join(current_line))
                 current_line = []
             current_line.append(quoted)
 
-            # Keep short flag-value pairs together (e.g. -c:v libx264, -i file.mkv)
             if i + 1 < len(cmd) and not cmd[i + 1].startswith("-"):
-                current_line.append(shlex.quote(cmd[i + 1]))
+                nxt = cmd[i + 1]
+                nxt_quoted = nxt if nxt.startswith("${") and nxt.endswith("}") else shlex.quote(nxt)
+                current_line.append(nxt_quoted)
                 i += 1
         else:
             current_line.append(quoted)
@@ -239,22 +243,45 @@ def format_cmd_tokens(cmd: list) -> str:
     if current_line:
         lines.append("  " + " ".join(current_line))
 
-    # First token is executable name
     if lines:
         lines[0] = lines[0].strip()
 
     return " \\\n".join(lines)
 
 
-def format_pipeline_to_bash(
-    stage1: list, stage2: list, tmp_mkv: str
-) -> str:
-    """Formats two-stage FFmpeg pipeline into clean multiline bash script syntax."""
-    s1_str = format_cmd_tokens(stage1)
-    s2_str = format_cmd_tokens(stage2)
-    clean_tmp = shlex.quote(tmp_mkv)
+def resolve_cmd_args(cmd_template: List[str], paths: dict) -> List[str]:
+    """Resolves ${VAR} placeholders to concrete file path strings for subprocess execution."""
+    resolved = []
+    for token in cmd_template:
+        if token.startswith("${") and token.endswith("}"):
+            var_name = token[2:-1]
+            resolved.append(paths[var_name])
+        else:
+            resolved.append(token)
+    return resolved
 
-    return f"{s1_str}\n\n{s2_str}\n\nrm -f {clean_tmp}"
+
+def format_pipeline_to_bash(pipeline: dict) -> str:
+    """Formats two-stage FFmpeg pipeline into clean multiline bash script syntax with header variables."""
+    paths = pipeline["paths"]
+
+    var_header = [
+        f'SRC_MKV={shlex.quote(paths["SRC_MKV"])}',
+        f'TMP_MKV={shlex.quote(paths["TMP_MKV"])}',
+        f'META_TXT={shlex.quote(paths["META_TXT"])}',
+        f'VTT_SUB={shlex.quote(paths["VTT_SUB"])}',
+        f'OUT_MP4={shlex.quote(paths["OUT_MP4"])}',
+        "",
+    ]
+
+    s1_str = format_cmd_tokens(pipeline["stage1"])
+    s2_str = format_cmd_tokens(pipeline["stage2"])
+
+    script_body = f"{s1_str}\n\n{s2_str}\n\nrm -f \"${{TMP_MKV}}\""
+
+    return "\n".join(var_header) + script_body
+
+
 
 def clean_directory(
     target_dir: Path,

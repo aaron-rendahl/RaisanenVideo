@@ -221,9 +221,7 @@ def process_clip_pipeline(
     single_script_lines: list[str],
 ) -> None:
     """Dispatches pipeline execution to script generator or direct subprocess."""
-    multiline_cmd = format_pipeline_to_bash(
-        pipe["stage1"], pipe["stage2"], pipe["tmp_mkv"]
-    )
+    multiline_cmd = format_pipeline_to_bash(pipe)
 
     if cfg.do_split_scripts:
         print(
@@ -237,11 +235,12 @@ def process_clip_pipeline(
 
         script_body = [
             "#!/usr/bin/env bash",
-            "set -e\n",
+            "set -euo pipefail",
+            "",
             f"# Clip [{clip.idx}]: {clip.title}",
-            multiline_cmd + "\n",
+            multiline_cmd,
         ]
-        sub_script_path.write_text("\n".join(script_body), encoding="utf-8")
+        sub_script_path.write_text("\n".join(script_body) + "\n", encoding="utf-8")
         sub_script_path.chmod(0o755)
         run_all_lines.append(f"./{script_filename}")
 
@@ -261,13 +260,12 @@ def process_clip_pipeline(
         log_file.write(f"\n--- Encoding Clip [{clip.idx}]: {clip.title} ---\n")
         log_file.flush()
 
-        subprocess.run(
-            pipe["stage1"], stdout=log_file, stderr=log_file, check=True
-        )
-        subprocess.run(
-            pipe["stage2"], stdout=log_file, stderr=log_file, check=True
-        )
+        # Resolve ${VAR} placeholders to concrete paths right before running
+        s1_args = resolve_cmd_args(pipe["stage1"], pipe["paths"])
+        s2_args = resolve_cmd_args(pipe["stage2"], pipe["paths"])
 
+        subprocess.run(s1_args, stdout=log_file, stderr=log_file, check=True)
+        subprocess.run(s2_args, stdout=log_file, stderr=log_file, check=True)
 
 def main():
     register_cleanup_signals()
@@ -390,7 +388,8 @@ def main():
                 clip_id=str(clip.idx),
             )
 
-            ACTIVE_TEMP_FILES.add(pipe["tmp_mkv"])
+            tmp_mkv = pipe["paths"]["TMP_MKV"]
+            ACTIVE_TEMP_FILES.add(tmp_mkv)
 
             try:
                 process_clip_pipeline(
@@ -408,9 +407,9 @@ def main():
                     f" ({format_elapsed_time(time.perf_counter() - clip_start_time)})"
                 )
             finally:
-                if os.path.exists(pipe["tmp_mkv"]):
-                    os.remove(pipe["tmp_mkv"])
-                ACTIVE_TEMP_FILES.discard(pipe["tmp_mkv"])
+                if os.path.exists(tmp_mkv):
+                    os.remove(tmp_mkv)
+                ACTIVE_TEMP_FILES.discard(tmp_mkv)
 
     if cfg.do_split_scripts:
         master = tape_log_dir / "run_all.sh"
