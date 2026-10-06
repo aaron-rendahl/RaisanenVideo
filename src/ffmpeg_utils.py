@@ -34,6 +34,7 @@ def generate_concat_ffmetadata(
 
     for start_sec, end_sec, title in segments:
         duration = 10.0 if is_test else max(0.1, end_sec - start_sec)
+        duration = round(duration, 3)
         start_ms = int(current_time * 1000)
         end_ms = int((current_time + duration) * 1000)
 
@@ -118,6 +119,7 @@ def build_clip_pipeline(
 
         for idx, (s_sec, e_sec, _) in enumerate(segments):
             dur = 10.0 if do_test else (e_sec - s_sec)
+            dur = round(dur, 3)
 
             if has_audio:
                 audio_filter = f"[0:a]atrim=start={s_sec}:duration={dur},asetpts=PTS-STARTPTS[a{idx}]"
@@ -148,7 +150,8 @@ def build_clip_pipeline(
     else:
         s_sec, e_sec, _ = segments[0]
         dur = 10.0 if do_test else (e_sec - s_sec)
-
+        dur = round(dur, 3)
+        
         if has_audio:
             stage1_cmd.extend(
                 [
