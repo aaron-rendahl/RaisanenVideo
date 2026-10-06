@@ -417,7 +417,7 @@ def main():
         master.chmod(0o755)
     elif cfg.do_dry_run:
         script_out = tape_log_dir / "run_encode.sh"
-        script_out.write_text("\n".join(single_script_lines), encoding="utf-8")
+        script_out.write_text("\n".join(single_script_lines) + "\n", encoding="utf-8")
         script_out.chmod(0o755)
 
     print(
