@@ -26,7 +26,8 @@ def read_mkv_metadata(mkv_path: str | Path) -> ArchiveData:
 
 def parse_mkv_xml_strings(chapters_xml: str, tags_xml: str) -> ArchiveData:
     """Pure data processing: parses raw Matroska XML strings for chapters and tags
-    and reconstructs the domain ArchiveData model matching generate_mkv_chapters_and_tags.
+    and reconstructs the domain ArchiveData model matching the result from the
+    'generate mkv chapters and tags' function.
     """
     chapter_tags = {}
     global_crop = ""

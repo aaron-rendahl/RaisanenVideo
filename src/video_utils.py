@@ -1,19 +1,6 @@
 import json
 import subprocess
 
-def has_audio_stream(mkv_path: Path) -> bool:
-    """Returns True if the MKV container has at least one audio stream."""
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "a",
-        "-show_entries", "stream=index",
-        "-of", "csv=p=0",
-        str(mkv_path)
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    return bool(res.stdout.strip())
-
-
 def get_video_duration(video_path: str) -> str:
     """Returns total duration of a video file formatted as HH:MM:SS.mmm using ffprobe."""
     cmd = [
