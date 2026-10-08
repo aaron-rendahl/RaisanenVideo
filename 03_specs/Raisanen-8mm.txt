@@ -3,7 +3,8 @@
 GLOBAL_CROP = 30 6 18 8
 
 # REEL 1
-01|00:00:12.162|00:18:49.978|BWCA| crop= 26 10 8 8
+# previously had crop= 26 10 8 8
+01|00:00:12.162|00:18:49.978|BWCA
 
 # REEL 2
 02|00:19:22.862|00:20:18.417|kids playing
