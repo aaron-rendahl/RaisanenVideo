@@ -63,9 +63,14 @@ echo "Output: $OUTPUT_FILE"
 
 if [ "$IS_8MM" = true ]; then
     echo "Mode  : 8mm Tape Transfer (1.5x slowdown, stripping audio)"
+    ## ## NOPE! Don't do this, there are still video alignment issues that need to be fixed
+    ## ## Use mkvmerge to get fps correct, don't need +genpts to align audio mismatch
+    ## ## # mkvmerge -o $OUTPUT_FILE --default-duration 0:19.98fps $INPUT_FILE
+    ## To use ffmpeg properly, need both -itsscale and -r, as the fps is stored two ways
     ffmpeg -hide_banner -loglevel error -y \
       -fflags +genpts \
       -itsscale 1.5 \
+      -r 20000/1001 \
       -i "$INPUT_FILE" \
       -c:v copy \
       -an \
@@ -73,6 +78,7 @@ if [ "$IS_8MM" = true ]; then
       "$OUTPUT_FILE"
 else
     echo "Mode  : Standard Tape (Original speed and audio)"
+    # Use ffmpeg with +genpts to fix audio misalignment
     ffmpeg -hide_banner -loglevel error -y \
       -fflags +genpts \
       -i "$INPUT_FILE" \
