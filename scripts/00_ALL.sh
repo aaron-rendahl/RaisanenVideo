@@ -2,13 +2,15 @@ VID="Raisanen-1987a"
 VID="Raisanen-8mm"
 VID="Raisanen-1987-Willy-40th"
 VID="You-Cant-Take-It-With-You"
+
+IS8MM=true
 IS8MM=false
 
 SCRIPT_DIR="./scripts"
 ORIGINAL_DIR="./00_originals"
 ARCHIVE_DIR="./01_archive"
 
-$PYTHON=python3
+PYTHON=python3
 
 ## ---------------------------------------------
 ## 0) Unit tests on the code
@@ -44,7 +46,6 @@ if false; then
   mkvinfo $VID01 | grep -i crop
   ## check per clip metadata
   ffprobe -v quiet -print_format json -show_chapters "$VID01" | less
-
 fi
 
 ## ---------------------------------------------
