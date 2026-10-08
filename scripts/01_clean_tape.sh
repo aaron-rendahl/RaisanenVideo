@@ -72,8 +72,10 @@ if [ "$IS_8MM" = true ]; then
       -itsscale 1.5 \
       -r 20000/1001 \
       -i "$INPUT_FILE" \
+      -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \
       -c:v copy \
-      -an \
+      -c:a pcm_s16le \
+      -shortest \
       -max_muxing_queue_size 1024 \
       "$OUTPUT_FILE"
 else
