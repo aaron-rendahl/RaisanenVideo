@@ -370,6 +370,7 @@ ffmpeg -y -loglevel warning \\
   -c copy \\
   -avoid_negative_ts make_zero \\
   -movflags +faststart \\
+  -use_editlist 0 \\
   "$OUT_MP4"
 
 echo "==> Cleaning up staging file..."
