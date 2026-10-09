@@ -47,10 +47,7 @@ def to_builder_data(
         clip_crop = clip.crop or archive.global_crop
         safe_clip_title = sanitize_filename(clip.title)
 
-        # Output final MP4 -> 02_clips/VID/
         out_concat_path = str((clips_dir / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
-        
-        # Black spacer -> 04_prep/VID/scenes/
         clip_spacer_path = str((scenes_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
 
         items_to_process = clip.subchapters if clip.subchapters else [clip]
@@ -64,7 +61,6 @@ def to_builder_data(
             end_sec = timestamp_to_seconds(item.end)
             duration_sec = max(0.0, end_sec - start_sec)
 
-            # Temp and scene MP4s -> 04_prep/VID/scenes/
             temp_mkv_path = str((scenes_dir / f'{scene_id}_temp.mkv').resolve())
             out_mp4_path = str((scenes_dir / f'{scene_id}.mp4').resolve())
 
