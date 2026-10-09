@@ -33,15 +33,15 @@ def to_builder_data(
     vid: str,
     prep_dir: Path,
     master_mkv_path: Path,
-    overall_title: str = "",
-    fps: str = "30000/1001",
-    resolution: str = "720x480"
+    overall_title: str = '',
+    fps: str = '30000/1001',
+    resolution: str = '720x480'
 ) -> Dict[str, Any]:
-    """Transforms ArchiveData model into scene extraction tasks and clip-level specs."""
-    scenes = []
-    clips = []
-    scene_dir = prep_dir / vid / "scenes"
+    """Transforms ArchiveData into a hierarchical clip-and-scene structure."""
+    scene_dir = prep_dir / vid / 'scenes'
     abs_master_mkv = str(master_mkv_path.resolve())
+
+    clips = []
 
     for clip in archive.clips:
         clip_crop = clip.crop or archive.global_crop
@@ -51,11 +51,11 @@ def to_builder_data(
         out_concat_path = str((prep_dir / vid / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
 
         items_to_process = clip.subchapters if clip.subchapters else [clip]
-        group_scene_paths = []
+        clip_scenes = []
 
         for item in items_to_process:
             clean_title = sanitize_filename(item.title)
-            scene_id = f"{vid}-{item.idx}-{clean_title}"
+            scene_id = f'{vid}-{item.idx}-{clean_title}'
 
             start_sec = timestamp_to_seconds(item.start)
             end_sec = timestamp_to_seconds(item.end)
@@ -64,7 +64,7 @@ def to_builder_data(
             temp_mkv_path = str((scene_dir / f'{scene_id}_temp.mkv').resolve())
             out_mp4_path = str((scene_dir / f'{scene_id}.mp4').resolve())
 
-            scenes.append({
+            clip_scenes.append({
                 'scene_id': scene_id,
                 'master_mkv_path': abs_master_mkv,
                 'start_time': item.start,
@@ -79,19 +79,16 @@ def to_builder_data(
                 'fps': fps
             })
 
-            group_scene_paths.append(out_mp4_path)
-
         clips.append({
             'clip_idx': clip.idx,
             'title': clip.title,
             'crop': clip_crop,
             'black_spacer_path': clip_spacer_path,
             'out_concat_path': out_concat_path,
-            'scene_paths': group_scene_paths
+            'scenes': clip_scenes  # Scenes live inside their parent clip!
         })
 
     return {
         'vid': vid,
-        'scenes': scenes,
         'clips': clips
     }
