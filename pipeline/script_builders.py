@@ -11,57 +11,33 @@ from typing import List, Dict, Any
 # ==============================================================================
 
 def build_utvideo_cmd(scene: dict) -> str:
-    """Builds Pass 1: Lossless Ut Video extraction command."""
-    master = scene['master_mkv_path']
-    start = scene['start_time']
-    end = scene['end_time']
-    out_temp = scene['temp_mkv_path']
-
+    """Builds Pass 1: Lossless Ut Video extraction command using bash variables."""
     return (
         f'ffmpeg -y -loglevel warning \\\n'
-        f'  -ss {start} -to {end} \\\n'
-        f'  -i "{master}" \\\n'
+        f'  -ss "$START_TIME" -to "$END_TIME" \\\n'
+        f'  -i "$MASTER_MKV" \\\n'
         f'  -map 0:v:0 -map 0:a:0 -map_chapters -1 \\\n'
         f'  -c:v utvideo -c:a pcm_s16le \\\n'
-        f'  "{out_temp}"'
+        f'  "$TEMP_MKV"'
     )
 
-
 def build_h264_cmd(scene: dict) -> str:
-    """Builds Pass 2: Standardized H.264 MP4 render command."""
-    in_temp = scene['temp_mkv_path']
-    out_mp4 = scene['out_mp4_path']
-    duration = scene['duration_sec']
-    crop = scene.get('crop')
-    title = scene.get('title', '')
-    reel_title = scene.get('reel_title', '')
-
-    vf_flag = f'-vf "{crop}" ' if crop else ''
-    fade_out_start = max(0.0, round(duration - 0.005, 3))
-    af_filter = f'-af "afade=t=in:st=0:d=0.005,afade=t=out:st={fade_out_start:.3f}:d=0.005"'
-
-    meta_flags = []
-    if title:
-        meta_flags.append(f'-metadata title="{title}"')
-    if reel_title:
-        meta_flags.append(f'-metadata album="{reel_title}"')
-    meta_str = ' \\\n  '.join(meta_flags)
-    if meta_str:
-        meta_str = '  ' + meta_str + ' \\\n'
-
+    """Builds Pass 2: Standardized H.264 MP4 render command using bash variables."""
     return (
+        f'FADE="afade=t=in:st=0:d=0.005,afade=t=out:st=$FADE_OUT_START:d=0.005"\n'
         f'ffmpeg -y -loglevel warning \\\n'
-        f'  -i "{in_temp}" \\\n'
-        f'  {vf_flag}-c:v libx264 -crf 22 -preset slow \\\n'
+        f'  -i "$TEMP_MKV" \\\n'
+        f'  ${{CROP_FILTER:+-vf "$CROP_FILTER" }}\\\n'
+        f'  -c:v libx264 -crf 22 -preset slow \\\n'
         f'  -force_key_frames "expr:eq(n,0)" -g 60 \\\n'
         f'  -pix_fmt yuv420p -tag:v avc1 \\\n'
         f'  -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\\n'
-        f'  {af_filter} -c:a aac -b:a 192k -ar 48000 \\\n'
-        f'  {meta_str}'
+        f'  -af "$FADE" -c:a aac -b:a 192k -ar 48000 \\\n'
+        f'  -metadata title="$TITLE" \\\n'
+        f'  -metadata album="$REEL_TITLE" \\\n'
         f'  -shortest \\\n'
-        f'  "{out_mp4}"'
+        f'  "$OUT_MP4"'
     )
-
 
 def build_black_spacer_cmd(scene_sample: dict) -> str:
     """Builds 1-second dimension/fps-matched black spacer command."""
