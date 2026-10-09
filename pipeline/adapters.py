@@ -5,6 +5,29 @@ from typing import Any, Dict, List
 
 from pipeline.models import ArchiveData
 
+def timestamp_to_seconds(ts: str) -> float:
+    """Converts 'HH:MM:SS.mmm' or 'MM:SS.mmm' string to float seconds."""
+    if not ts:
+        return 0.0
+    parts = ts.strip().split(':')
+    if len(parts) == 3:
+        h, m, s = parts
+        return float(h) * 3600 + float(m) * 60 + float(s)
+    elif len(parts) == 2:
+        m, s = parts
+        return float(m) * 60 + float(s)
+    return float(parts[0])
+
+
+def sanitize_filename(title: str) -> str:
+    """Converts titles into clean, filesystem-safe string segments."""
+    if not title:
+        return "untitled"
+    # Replace spaces with underscores and remove non-alphanumeric/hyphen/underscore chars
+    cleaned = re.sub(r'\s+', '_', title.strip())
+    cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', cleaned)
+    return cleaned.strip('_') or "untitled"
+
 def to_builder_data(
     archive: ArchiveData,
     vid: str,
