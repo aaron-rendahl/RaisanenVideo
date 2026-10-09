@@ -189,7 +189,7 @@ def write_extract_script(
     scenes: List[Dict[str, Any]],
     script_dir: Path
 ) -> Path:
-    """Generates 01_extract_scenes.sh and individual per-scene scripts."""
+    """Generates 01_extract_scenes.sh and individual per-scene scripts using clean bash variables."""
     script_dir.mkdir(parents=True, exist_ok=True)
     master_script_path = script_dir / "01_extract_scenes.sh"
     individual_script_calls = []
@@ -198,20 +198,35 @@ def write_extract_script(
         scene_sh_name = f"{scene['scene_id']}.sh"
         scene_sh_path = script_dir / scene_sh_name
         
+        # Build individual command strings using clean bash variable references
         utvideo_cmd = build_utvideo_cmd(scene)
         h264_cmd = build_h264_cmd(scene)
         
         scene_sh_content = f"""#!/usr/bin/env bash
 set -euo pipefail
 
+# ==============================================================================
 # Scene Processing: {scene['scene_id']}
+# ==============================================================================
+
+# Input & Staging Paths
+MASTER_MKV="{scene['master_mkv_path']}"
+TEMP_MKV="{scene['temp_mkv_path']}"
+OUT_MP4="{scene['out_mp4_path']}"
+
+# Scene Timecodes & Durations
+START_TIME="{scene['start_time']}"
+END_TIME="{scene['end_time']}"
+
+echo "==> Processing Scene: {scene['scene_id']}"
 echo "  -> [1/2] Lossless extraction (Ut Video)..."
 {utvideo_cmd}
 
 echo "  -> [2/2] Standardized H.264 render..."
 {h264_cmd}
 
-rm -f "{scene['temp_mkv_path']}"
+echo "  -> Cleaning up temporary intermediate..."
+rm -f "$TEMP_MKV"
 """
         scene_sh_path.write_text(scene_sh_content)
         scene_sh_path.chmod(0o755)
@@ -226,7 +241,7 @@ set -euo pipefail
 echo "==> [Phase 3.1] Generating 1-second dimension-matched black spacer..."
 {black_cmd}
 
-echo "==> [Phase 3.2] Extracting and encoding {len(scenes)} scenes..."
+echo "==> [Phase 3.2] Extracting and encoding {len(scenes)} scene(s)..."
 """ + "\n".join(individual_script_calls) + """
 
 echo "==> [Phase 3] Scene extraction completed successfully!"
@@ -235,7 +250,6 @@ echo "==> [Phase 3] Scene extraction completed successfully!"
     master_script_path.write_text(master_content)
     master_script_path.chmod(0o755)
     return master_script_path
-
 
 def write_concat_script(
     vid: str,
