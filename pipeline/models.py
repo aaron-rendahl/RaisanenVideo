@@ -74,7 +74,7 @@ def timestamp_to_seconds(ts: str) -> float:
 
 
 def sanitize_filename(title: str) -> str:
-    """Converts scene titles into clean, filesystem-safe string segments."""
+    """Converts titles into clean, filesystem-safe string segments."""
     if not title:
         return "untitled"
     # Replace spaces with underscores and remove non-alphanumeric/hyphen/underscore chars
@@ -82,33 +82,30 @@ def sanitize_filename(title: str) -> str:
     cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', cleaned)
     return cleaned.strip('_') or "untitled"
 
-
-def to_builder_scenes(
-    archive: ArchiveData, 
-    vid: str, 
-    prep_dir: Path, 
+def to_builder_data(
+    archive: ArchiveData,
+    vid: str,
+    prep_dir: Path,
     master_mkv_path: Path,
     overall_title: str = "",
     fps: str = "30000/1001",
     resolution: str = "720x480"
-) -> List[Dict[str, Any]]:
-    """
-    Transforms ArchiveData model into scene dictionaries required by script_builders.py.
-    """
+) -> Dict[str, Any]:
+    """Transforms ArchiveData model into scene extraction tasks and clip-level specs."""
     scenes = []
+    clips = []
     scene_dir = prep_dir / vid / "scenes"
     abs_master_mkv = str(master_mkv_path.resolve())
-    black_mp4 = str((scene_dir / f"{vid}-00-black.mp4").resolve())
 
     for clip in archive.clips:
         clip_crop = clip.crop or archive.global_crop
-        
-        # If clip has subchapters, process each subchapter as a scene
-        if clip.subchapters:
-            items_to_process = clip.subchapters
-        else:
-            # Clip itself acts as a single scene item
-            items_to_process = [clip]
+        safe_clip_title = sanitize_filename(clip.title)
+
+        clip_spacer_path = str((scene_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
+        out_concat_path = str((prep_dir / vid / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
+
+        items_to_process = clip.subchapters if clip.subchapters else [clip]
+        group_scene_paths = []
 
         for item in items_to_process:
             clean_title = sanitize_filename(item.title)
@@ -118,8 +115,8 @@ def to_builder_scenes(
             end_sec = timestamp_to_seconds(item.end)
             duration_sec = max(0.0, end_sec - start_sec)
 
-            temp_mkv = str((scene_dir / f"{scene_id}_temp.mkv").resolve())
-            out_mp4 = str((scene_dir / f"{scene_id}.mp4").resolve())
+            temp_mkv_path = str((scene_dir / f'{scene_id}_temp.mkv').resolve())
+            out_mp4_path = str((scene_dir / f'{scene_id}.mp4').resolve())
 
             scenes.append({
                 'scene_id': scene_id,
@@ -127,9 +124,8 @@ def to_builder_scenes(
                 'start_time': item.start,
                 'end_time': item.end,
                 'duration_sec': duration_sec,
-                'temp_mkv_path': temp_mkv,
-                'out_mp4_path': out_mp4,
-                'black_spacer_path': black_mp4,
+                'temp_mkv_path': temp_mkv_path,
+                'out_mp4_path': out_mp4_path,
                 'crop': clip_crop,
                 'title': item.title,
                 'reel_title': overall_title or vid,
@@ -137,4 +133,19 @@ def to_builder_scenes(
                 'fps': fps
             })
 
-    return scenes
+            group_scene_paths.append(out_mp4_path)
+
+        clips.append({
+            'clip_idx': clip.idx,
+            'title': clip.title,
+            'crop': clip_crop,
+            'black_spacer_path': clip_spacer_path,
+            'out_concat_path': out_concat_path,
+            'scene_paths': group_scene_paths
+        })
+
+    return {
+        'vid': vid,
+        'scenes': scenes,
+        'clips': clips
+    }
