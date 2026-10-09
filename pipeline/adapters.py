@@ -31,14 +31,14 @@ def sanitize_filename(title: str) -> str:
 def to_builder_data(
     archive: ArchiveData,
     vid: str,
-    prep_dir: Path,
+    scenes_dir: Path,
+    clips_dir: Path,
     master_mkv_path: Path,
     overall_title: str = '',
     fps: str = '30000/1001',
     resolution: str = '720x480'
 ) -> Dict[str, Any]:
     """Transforms ArchiveData into a hierarchical clip-and-scene structure."""
-    scene_dir = prep_dir / vid / 'scenes'
     abs_master_mkv = str(master_mkv_path.resolve())
 
     clips = []
@@ -47,8 +47,11 @@ def to_builder_data(
         clip_crop = clip.crop or archive.global_crop
         safe_clip_title = sanitize_filename(clip.title)
 
-        clip_spacer_path = str((scene_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
-        out_concat_path = str((prep_dir / vid / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
+        # Output final MP4 -> 02_clips/VID/
+        out_concat_path = str((clips_dir / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
+        
+        # Black spacer -> 04_prep/VID/scenes/
+        clip_spacer_path = str((scenes_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
 
         items_to_process = clip.subchapters if clip.subchapters else [clip]
         clip_scenes = []
@@ -61,8 +64,9 @@ def to_builder_data(
             end_sec = timestamp_to_seconds(item.end)
             duration_sec = max(0.0, end_sec - start_sec)
 
-            temp_mkv_path = str((scene_dir / f'{scene_id}_temp.mkv').resolve())
-            out_mp4_path = str((scene_dir / f'{scene_id}.mp4').resolve())
+            # Temp and scene MP4s -> 04_prep/VID/scenes/
+            temp_mkv_path = str((scenes_dir / f'{scene_id}_temp.mkv').resolve())
+            out_mp4_path = str((scenes_dir / f'{scene_id}.mp4').resolve())
 
             clip_scenes.append({
                 'scene_id': scene_id,
@@ -85,7 +89,7 @@ def to_builder_data(
             'crop': clip_crop,
             'black_spacer_path': clip_spacer_path,
             'out_concat_path': out_concat_path,
-            'scenes': clip_scenes  # Scenes live inside their parent clip!
+            'scenes': clip_scenes
         })
 
     return {
