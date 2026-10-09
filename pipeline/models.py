@@ -26,9 +26,13 @@ class ArchiveData:
     global_crop: str = ""
     global_date: str = ""
     raw_spec: str = ""
-    is_multi_clip: bool = False
     clips: List[Clip] = dataclasses.field(default_factory=list)
     warnings: List[str] = dataclasses.field(default_factory=list)
+
+    @property
+    def is_multi_clip(self) -> bool:
+        """Returns True if there are 2 or more clips in the archive data."""
+        return len(self.clips) > 1
 
     def print_warnings(self):
         """Prints all collected spec warnings in a prominent banner."""
