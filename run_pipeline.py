@@ -130,12 +130,11 @@ def main():
         vid=vid,
         scenes=scenes,
         script_dir=dirs["scripts"],
+        scenes_dir=dirs["scenes"]
     )
 
     # 5. Generate Phase 4: Concat Manifests, ffmetadata, WebVTT, and Concat Scripts
     print(f"--> Writing Phase 4 manifest and concat scripts...")
-
-    black_spacer_path = dirs["scenes"] / f"{vid}-00-black.mp4"
 
     if archive_data.is_multi_clip:
         # Group scene dictionaries by clip
@@ -151,7 +150,8 @@ def main():
             manifest_path = dirs["scripts"] / f"{clip_id}.txt"
             meta_txt_path = dirs["metadata"] / f"{clip_id}.txt"
             meta_vtt_path = dirs["metadata"] / f"{clip_id}.vtt"
-
+            black_spacer_path = dirs["scenes"] / f"{clip_id}-00-black.mp4"
+            
             # Derive clip title safely
             first_scene = clip_scenes[0]
             clean_clip_title = first_scene.get("title", f"Clip_{clip_idx}")
@@ -177,6 +177,7 @@ def main():
         manifest_path = dirs["scripts"] / f"{vid}.txt"
         meta_txt_path = dirs["metadata"] / f"{vid}.txt"
         meta_vtt_path = dirs["metadata"] / f"{vid}.vtt"
+        black_spacer_path = dirs["scenes"] / f"{clip_id}-00-black.mp4"
 
         reel_title = archive_data.global_date or vid
         out_mp4_path = dirs["clips"] / f"{vid}.mp4"
