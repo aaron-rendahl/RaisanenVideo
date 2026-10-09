@@ -68,8 +68,8 @@ def generate_pipeline(
         clip_id = f"{vid}-{clip_idx}"
         clip_scenes = clip["scenes"]
 
-        manifest_path = dirs.scripts / f"{clip_id}.txt"
-        meta_txt_path = dirs.metadata / f"{clip_id}.txt"
+        manifest_path = dirs.metadata / f"{clip_idx}-manifest.txt"
+        meta_txt_path = dirs.metadata / f"{clip_idx}-meta.txt"
         black_spacer_path = Path(clip["black_spacer_path"])
         clean_clip_title = clip.get("title") or f"Clip_{clip_idx}"
 

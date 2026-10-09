@@ -290,12 +290,13 @@ def write_main_script(
 ) -> Path:
     """Generates the main main execution shell script using Jinja2."""
     script_dir = script_dir.resolve()
-    main_sh_path = script_dir / "01_run_pipeline.sh"
+    main_sh_path = script_dir / "00-run_pipeline.sh"
 
     template = jinja_env.get_template("main_pipeline.sh.j2")
     content = template.render(
         vid=vid,
         clips=clips,
+        script_dir=script_dir,
     )
 
     main_sh_path.write_text(content)
