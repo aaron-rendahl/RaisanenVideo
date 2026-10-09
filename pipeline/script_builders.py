@@ -165,7 +165,7 @@ def write_extract_script(
     scenes: List[Dict[str, Any]],
     script_dir: Path
 ) -> Path:
-    """Generates 01_extract_scenes.sh and individual per-scene scripts using clean bash variables."""
+    """Generates 01_extract_scenes.sh and individual per-scene scripts with explicit bash variables."""
     script_dir.mkdir(parents=True, exist_ok=True)
     master_script_path = script_dir / "01_extract_scenes.sh"
     individual_script_calls = []
@@ -173,11 +173,16 @@ def write_extract_script(
     for scene in scenes:
         scene_sh_name = f"{scene['scene_id']}.sh"
         scene_sh_path = script_dir / scene_sh_name
-        
-        # Build individual command strings using clean bash variable references
+
+        duration = scene['duration_sec']
+        fade_out_start = max(0.0, round(duration - 0.005, 3))
+        crop_val = scene.get('crop') or ""
+        title_val = scene.get('title', '')
+        reel_title_val = scene.get('reel_title', '')
+
         utvideo_cmd = build_utvideo_cmd(scene)
         h264_cmd = build_h264_cmd(scene)
-        
+
         scene_sh_content = f"""#!/usr/bin/env bash
 set -euo pipefail
 
@@ -190,9 +195,16 @@ MASTER_MKV="{scene['master_mkv_path']}"
 TEMP_MKV="{scene['temp_mkv_path']}"
 OUT_MP4="{scene['out_mp4_path']}"
 
-# Scene Timecodes & Durations
+# Timecodes & Durations
 START_TIME="{scene['start_time']}"
 END_TIME="{scene['end_time']}"
+DURATION="{duration}"
+FADE_OUT_START="{fade_out_start:.3f}"
+
+# Video & Metadata Parameters
+CROP_FILTER="{crop_val}"
+TITLE="{title_val}"
+REEL_TITLE="{reel_title_val}"
 
 echo "==> Processing Scene: {scene['scene_id']}"
 echo "  -> [1/2] Lossless extraction (Ut Video)..."
