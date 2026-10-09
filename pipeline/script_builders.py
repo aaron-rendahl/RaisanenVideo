@@ -227,25 +227,24 @@ def build_crop_filter(crop_str: str) -> str:
 from pathlib import Path
 from typing import Any, Dict, List
 
+
 def write_extract_script(
     vid: str,
     clips: List[Dict[str, Any]],
     script_dir: Path,
     scenes_dir: Path
-) -> Path:
-    """Generates 01_extract_scenes.sh, per-clip black spacer scripts, and individual scene scripts
-
-    with black spacer generation interleaved after scene extractions.
-    """
+) -> None:
+    """Generates individual scene processing scripts and clip-level black spacer scripts."""
     script_dir.mkdir(parents=True, exist_ok=True)
     scenes_dir.mkdir(parents=True, exist_ok=True)
-    master_script_path = script_dir / "01_extract_scenes.sh"
 
-    # 1. Generate individual scene extraction scripts (iterating over child scenes inside clips)
     for clip in clips:
+        clip_idx = clip['clip_idx']
+        clip_id = f"{vid}-{clip_idx}"
+
+        # 1. Generate individual scene extraction scripts
         for scene in clip['scenes']:
-            scene_sh_name = f"{scene['scene_id']}.sh"
-            scene_sh_path = script_dir / scene_sh_name
+            scene_sh_path = script_dir / f"{scene['scene_id']}.sh"
 
             duration = scene['duration_sec']
             fade_out_start = max(0.0, round(duration - 0.005, 3))
@@ -293,23 +292,11 @@ rm -f "$TEMP_MKV"
             scene_sh_path.write_text(scene_sh_content)
             scene_sh_path.chmod(0o755)
 
-    # 2. Generate black spacer scripts and interleave master execution steps
-    master_body = []
-
-    for clip in clips:
-        clip_idx = clip['clip_idx']
-        clip_id = f"{vid}-{clip_idx}"
-
-        # 2a. Add calls for all scene extractions belonging to this clip
-        for scene in clip['scenes']:
-            scene_sh_path = script_dir / f"{scene['scene_id']}.sh"
-            master_body.append(f'bash "{scene_sh_path.resolve()}"')
-
-        # 2b. Generate black spacer script directly from clip object (no more first_scene workaround!)
+        # 2. Generate clip-level black spacer script (referencing clip's first scene)
         first_scene = clip['scenes'][0]
         spacer_mp4_path = Path(clip['black_spacer_path'])
         spacer_sh_path = script_dir / f"{clip_id}-black.sh"
-        
+
         spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
 
         spacer_sh_content = f"""#!/usr/bin/env bash
@@ -324,25 +311,6 @@ echo "==> Generating Black Spacer: {clip_id}-black.mp4"
 """
         spacer_sh_path.write_text(spacer_sh_content)
         spacer_sh_path.chmod(0o755)
-
-        # 2c. Add spacer call immediately after scenes in master script
-        master_body.append(f'bash "{spacer_sh_path.resolve()}"')
-        master_body.append("")  # Blank line separator between clips
-
-    # 3. Construct master orchestrator (01_extract_scenes.sh)
-    master_content = f"""#!/usr/bin/env bash
-set -euo pipefail
-
-# Phase 3: Scene Extraction & Spacer Pipeline for {vid}
-echo "==> Starting interleaved scene extraction and spacer generation..."
-
-""" + "\n".join(master_body) + f"""
-echo "==> [Phase 3] Scene extractions and black spacers generated successfully!"
-"""
-
-    master_script_path.write_text(master_content)
-    master_script_path.chmod(0o755)
-    return master_script_path
 
 def write_concat_script(
     vid: str,
