@@ -235,8 +235,7 @@ def build_crop_filter(crop_str: str) -> str:
         pass
     return ""
 
-from pathlib import Path
-from typing import Any, Dict, List
+
 
 
 def write_extract_script(
