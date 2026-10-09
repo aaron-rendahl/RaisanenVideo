@@ -137,22 +137,29 @@ def main():
     print(f"--> Writing Phase 4 manifest and concat scripts...")
 
     if archive_data.is_multi_clip:
-        # Group scene dictionaries by clip
+        # Group scene dictionaries by primary clip index ('01', '02', ..., '13')
         clip_groups = {}
         for scene in scenes:
-            # scene_id format: VID-CLIP_IDX-SCENE_IDX-TITLE
-            parts = scene["scene_id"].split("-")
-            clip_idx = parts[1] if len(parts) >= 2 else "01"
+            if "clip_idx" in scene and scene["clip_idx"]:
+                raw_idx = str(scene["clip_idx"])
+            else:
+                id_suffix = scene["scene_id"].replace(f"{vid}-", "")
+                raw_token = id_suffix.split("-")[0] if "-" in id_suffix else "01"
+                raw_idx = raw_token.split(".")[0]  # <--- Strips subchapters like .1, .01
+
+            clip_idx = raw_idx.zfill(2) if raw_idx.isdigit() else raw_idx
             clip_groups.setdefault(clip_idx, []).append(scene)
 
-        for clip_idx, clip_scenes in clip_groups.items():
+        concat_script_calls = []
+
+        for clip_idx in sorted(clip_groups.keys()):
+            clip_scenes = clip_groups[clip_idx]
             clip_id = f"{vid}-{clip_idx}"
             manifest_path = dirs["scripts"] / f"{clip_id}.txt"
             meta_txt_path = dirs["metadata"] / f"{clip_id}.txt"
             meta_vtt_path = dirs["metadata"] / f"{clip_id}.vtt"
-            black_spacer_path = dirs["scenes"] / f"{clip_id}-00-black.mp4"
+            black_spacer_path = dirs["scenes"] / f"{clip_id}-black.mp4"
             
-            # Derive clip title safely
             first_scene = clip_scenes[0]
             clean_clip_title = first_scene.get("title", f"Clip_{clip_idx}")
             out_mp4_path = dirs["clips"] / f"{clip_id}-{clean_clip_title}.mp4"
@@ -161,7 +168,7 @@ def main():
             build_ffmetadata_file(clip_scenes, meta_txt_path, title=clean_clip_title)
             build_webvtt_file(clip_scenes, meta_vtt_path)
 
-            write_concat_script(
+            clip_concat_sh = write_concat_script(
                 vid=vid,
                 clip_id=clip_id,
                 concat_txt_path=manifest_path,
@@ -170,7 +177,21 @@ def main():
                 out_mp4_path=out_mp4_path,
                 script_dir=dirs["scripts"],
             )
+            concat_script_calls.append(f'bash "{clip_concat_sh.resolve()}"')
             print(f"    -> Generated concat script for {clip_id}")
+
+        # Master 02_concat.sh driver script
+        master_concat_path = dirs["scripts"] / "02_concat.sh"
+        master_concat_content = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+# Phase 4: Master Concat Pipeline for {vid}
+""" + "\n".join(concat_script_calls) + """
+
+echo "==> [Phase 4] All clip concatenations completed successfully!"
+"""
+        master_concat_path.write_text(master_concat_content)
+        master_concat_path.chmod(0o755)
     else:
         # Single-clip reel
         clip_id = vid

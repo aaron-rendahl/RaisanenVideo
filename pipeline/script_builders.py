@@ -43,7 +43,6 @@ def build_h264_cmd(scene: dict) -> str:
 def build_black_spacer_cmd(scene: dict, out_spacer_path: Path) -> str:
     """Generates a 1-second black spacer matched to the post-crop resolution of a clip."""
     raw_crop = scene.get('crop', '')
-    
     # Base NTSC dimensions
     w, h = 720, 480
     
@@ -200,21 +199,27 @@ def write_extract_script(
     spacer_script_calls = []
     individual_script_calls = []
 
-    # 1. Group scenes by clip identifier
+    # 1. Group scenes strictly by primary clip index ('01', '02', ..., '13')
     clip_groups: Dict[str, List[Dict[str, Any]]] = {}
     for scene in scenes:
-        clip_key = str(scene.get("clip_id") or scene.get("clip_idx") or vid)
-        clip_groups.setdefault(clip_key, []).append(scene)
+        if "clip_idx" in scene and scene["clip_idx"]:
+            raw_idx = str(scene["clip_idx"])
+        else:
+            # Parse from scene_id: strip vid prefix -> take first token -> take portion before dot
+            id_suffix = scene["scene_id"].replace(f"{vid}-", "")
+            raw_token = id_suffix.split("-")[0] if "-" in id_suffix else "01"
+            raw_idx = raw_token.split(".")[0]  # <--- Strips subchapters like .1, .01
+
+        clip_idx = raw_idx.zfill(2) if raw_idx.isdigit() else raw_idx
+        clip_groups.setdefault(clip_idx, []).append(scene)
 
     # 2. Generate dedicated scripts for each clip's black spacer
-    for clip_key, clip_scenes in clip_groups.items():
-        if clip_key.startswith(vid):
-            clip_id = clip_key
-        else:
-            clip_id = f"{vid}-{clip_key}" if clip_key != vid else vid
+    for clip_idx in sorted(clip_groups.keys()):
+        clip_scenes = clip_groups[clip_idx]
+        clip_id = f"{vid}-{clip_idx}"
 
-        spacer_mp4_path = scenes_dir / f"{clip_id}-00-black.mp4"
-        spacer_sh_path = script_dir / f"{clip_id}-00-black.sh"
+        spacer_mp4_path = scenes_dir / f"{clip_id}-black.mp4"
+        spacer_sh_path = script_dir / f"{clip_id}-black.sh"
         
         first_scene = clip_scenes[0]
         spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
@@ -223,10 +228,10 @@ def write_extract_script(
 set -euo pipefail
 
 # ==============================================================================
-# Black Spacer Generation: {clip_id}-00-black
+# Black Spacer Generation: {clip_id}-black
 # ==============================================================================
 
-echo "==> Generating Black Spacer: {clip_id}-00-black.mp4"
+echo "==> Generating Black Spacer: {clip_id}-black.mp4"
 {spacer_cmd}
 """
         spacer_sh_path.write_text(spacer_sh_content)
@@ -312,9 +317,9 @@ def write_concat_script(
     out_mp4_path: Path,
     script_dir: Path
 ) -> Path:
-    """Generates 02_concat.sh for stream copy and metadata injection."""
+    """Generates a per-clip concat script for stream copy and metadata injection."""
     script_dir.mkdir(parents=True, exist_ok=True)
-    concat_script_path = script_dir / "02_concat.sh"
+    concat_script_path = script_dir / f"{clip_id}_concat.sh"  # <--- Per-clip script name!
     tmp_mp4_path = out_mp4_path.parent / f"{clip_id}-TEMP.mp4"
 
     script_content = f"""#!/usr/bin/env bash
@@ -327,7 +332,7 @@ META_VTT="{meta_vtt_path.resolve()}"
 TMP_MP4="{tmp_mp4_path.resolve()}"
 OUT_MP4="{out_mp4_path.resolve()}"
 
-echo "==> [Step 1/2] Zero-loss stream copy concatenation..."
+echo "==> [Step 1/2] Zero-loss stream copy concatenation for {clip_id}..."
 ffmpeg -y -loglevel warning \\
   -f concat -safe 0 -i "$CONCAT_TXT" \\
   -c copy "$TMP_MP4"
