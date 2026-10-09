@@ -192,12 +192,48 @@ def write_extract_script(
     script_dir: Path,
     scenes_dir: Path
 ) -> Path:
-    """Generates 01_extract_scenes.sh, per-clip black spacers, and individual scene scripts."""
+    """Generates 01_extract_scenes.sh, per-clip black spacer scripts, and individual scene scripts."""
     script_dir.mkdir(parents=True, exist_ok=True)
+    scenes_dir.mkdir(parents=True, exist_ok=True)
     master_script_path = script_dir / "01_extract_scenes.sh"
+    
+    spacer_script_calls = []
     individual_script_calls = []
 
-    # 1. Generate individual scene extraction scripts
+    # 1. Group scenes by clip identifier
+    clip_groups: Dict[str, List[Dict[str, Any]]] = {}
+    for scene in scenes:
+        clip_key = str(scene.get("clip_id") or scene.get("clip_idx") or vid)
+        clip_groups.setdefault(clip_key, []).append(scene)
+
+    # 2. Generate dedicated scripts for each clip's black spacer
+    for clip_key, clip_scenes in clip_groups.items():
+        if clip_key.startswith(vid):
+            clip_id = clip_key
+        else:
+            clip_id = f"{vid}-{clip_key}" if clip_key != vid else vid
+
+        spacer_mp4_path = scenes_dir / f"{clip_id}-00-black.mp4"
+        spacer_sh_path = script_dir / f"{clip_id}-00-black.sh"
+        
+        first_scene = clip_scenes[0]
+        spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
+
+        spacer_sh_content = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Black Spacer Generation: {clip_id}-00-black
+# ==============================================================================
+
+echo "==> Generating Black Spacer: {clip_id}-00-black.mp4"
+{spacer_cmd}
+"""
+        spacer_sh_path.write_text(spacer_sh_content)
+        spacer_sh_path.chmod(0o755)
+        spacer_script_calls.append(f'bash "{spacer_sh_path.resolve()}"')
+
+    # 3. Generate individual scene extraction scripts
     for scene in scenes:
         scene_sh_name = f"{scene['scene_id']}.sh"
         scene_sh_path = script_dir / scene_sh_name
@@ -249,33 +285,13 @@ rm -f "$TEMP_MKV"
         scene_sh_path.chmod(0o755)
         individual_script_calls.append(f'bash "{scene_sh_path.resolve()}"')
 
-    # 2. Group scenes by Clip ID to write per-clip dimension-matched black spacers
-    clip_groups: Dict[str, List[Dict[str, Any]]] = {}
-    for scene in scenes:
-        # Prefer explicit clip_id / clip_idx key if available, else fall back to vid
-        clip_key = str(scene.get("clip_id") or scene.get("clip_idx") or vid)
-        clip_groups.setdefault(clip_key, []).append(scene)
-
-    spacer_cmds = []
-    for clip_key, clip_scenes in clip_groups.items():
-        # Ensure consistent path naming matching run_pipeline.py: {clip_id}-00-black.mp4
-        if clip_key.startswith(vid):
-            spacer_filename = f"{clip_key}-00-black.mp4"
-        else:
-            spacer_filename = f"{vid}-{clip_key}-00-black.mp4" if clip_key != vid else f"{vid}-00-black.mp4"
-
-        black_spacer_path = scenes_dir / spacer_filename
-        # Derive dimensions from the first scene in this clip group
-        spacer_cmds.append(build_black_spacer_cmd(clip_scenes[0], black_spacer_path))
-
-    spacer_block = "\n\n".join(spacer_cmds)
-
+    # 4. Construct master orchestrator (01_extract_scenes.sh)
     master_content = f"""#!/usr/bin/env bash
 set -euo pipefail
 
 # Phase 3: Scene Extraction Pipeline for {vid}
-echo "==> [Phase 3.1] Generating dimension-matched black spacer(s)..."
-{spacer_block}
+echo "==> [Phase 3.1] Generating {len(spacer_script_calls)} dimension-matched black spacer(s)..."
+""" + "\n".join(spacer_script_calls) + f"""
 
 echo "==> [Phase 3.2] Extracting and encoding {len(scenes)} scene(s)..."
 """ + "\n".join(individual_script_calls) + """
