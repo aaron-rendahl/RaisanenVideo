@@ -14,12 +14,14 @@ def build_utvideo_cmd(scene: dict) -> str:
     """Pass 1: Suppresses container crop, conditionally applies spatial crop, and extracts 4:2:2 Ut Video."""
     return (
         f'ffmpeg -y -loglevel warning \\\n'
+        f'  -fflags +genpts \\\n'
         f'  -ss "$START_TIME" -to "$END_TIME" \\\n'
         f'  -apply_cropping 0 \\\n'
         f'  -i "$MASTER_MKV" \\\n'
         f'  -map 0:v:0 -map 0:a:0 -map_chapters -1 \\\n'
         f'  ${{CROP_FILTER:+-vf "$CROP_FILTER" }}\\\n'
         f'  -c:v utvideo -pix_fmt yuv422p -c:a pcm_s16le \\\n'
+        f'  -avoid_negative_ts make_zero \\\n'
         f'  "$TEMP_MKV"'
     )
 
@@ -29,6 +31,7 @@ def build_h264_cmd(scene: dict) -> str:
     return (
         f'FADE="afade=t=in:st=0:d=0.005,afade=t=out:st=$FADE_OUT_START:d=0.005"\n'
         f'ffmpeg -y -loglevel warning \\\n'
+        f'  -fflags +genpts \\\n'
         f'  -ch_layout stereo \\\n'
         f'  -i "$TEMP_MKV" \\\n'
         f'  -c:v libx264 -crf 22 -preset slow \\\n'
@@ -38,13 +41,15 @@ def build_h264_cmd(scene: dict) -> str:
         f'  -af "$FADE" -c:a aac -b:a 192k -ar 48000 \\\n'
         f'  -metadata title="$TITLE" \\\n'
         f'  -metadata album="$REEL_TITLE" \\\n'
+        f'  -avoid_negative_ts make_zero \\\n'
+        f'  -use_editlist 0 \\\n'
+        f'  -movflags +faststart \\\n'
         f'  -shortest \\\n'
         f'  "$OUT_MP4"'
     )
 
 def build_black_spacer_cmd(scene: dict, out_spacer_path: Path) -> str:
     """Generates a 1-second black spacer dynamically matched to the scene's exact
-
     rendered pixel dimensions, sample aspect ratio (SAR), and frame rate.
     """
     out_scene_path = Path(scene["out_mp4_path"])
@@ -86,8 +91,9 @@ def build_black_spacer_cmd(scene: dict, out_spacer_path: Path) -> str:
             w = stream.get("width", w)
             h = stream.get("height", h)
             probed_sar = stream.get("sample_aspect_ratio")
-            if probed_sar and probed_sar != "0:1" and probed_sar != "N/A":
-                sar = probed_sar
+            if probed_sar and probed_sar not in ("0:1", "N/A"):
+                # Convert colon notation (74:89) to slash notation (74/89) for setsar
+                sar = probed_sar.replace(":", "/")
 
             probed_fps = stream.get("r_frame_rate")
             if probed_fps and probed_fps != "0/0":
@@ -96,16 +102,21 @@ def build_black_spacer_cmd(scene: dict, out_spacer_path: Path) -> str:
             pass
 
     return (
-        f'ffmpeg -y -loglevel warning \\\n'
+        f'SPACER_PATH="{out_spacer_path}"\n'
+        f"ffmpeg -y -loglevel warning \\\n"
         f'  -f lavfi -i "color=c=black:s={w}x{h}:r={fps}:d=1.0" \\\n'
         f'  -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \\\n'
         f'  -vf "setsar={sar}" \\\n'
-        f'  -c:v libx264 -crf 22 -preset slow \\\n'
-        f'  -pix_fmt yuv420p -tag:v avc1 \\\n'
-        f'  -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\\n'
-        f'  -c:a aac -b:a 192k -ar 48000 -ch_layout stereo \\\n'
-        f'  -shortest \\\n'
-        f'  "{out_spacer_path}"'
+        f"  -c:v libx264 -crf 22 -preset slow \\\n"
+        f'  -force_key_frames "expr:eq(n,0)" -g 60 \\\n'
+        f"  -pix_fmt yuv420p -tag:v avc1 \\\n"
+        f"  -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\\n"
+        f"  -c:a aac -b:a 192k -ar 48000 -ch_layout stereo \\\n"
+        f"  -avoid_negative_ts make_zero \\\n"
+        f"  -use_editlist 0 \\\n"
+        f"  -movflags +faststart \\\n"
+        f"  -shortest \\\n"
+        f'  "$SPACER_PATH"'
     )
 
 
@@ -342,17 +353,22 @@ OUT_MP4="{out_mp4_path.resolve()}"
 
 echo "==> [Step 1/2] Zero-loss stream copy concatenation for {clip_id}..."
 ffmpeg -y -loglevel warning \\
-  -f concat -safe 0 -i "$CONCAT_TXT" \\
-  -c copy "$TMP_MP4"
+  -fflags +genpts \\
+  -f concat -safe 0 \\
+  -i "$CONCAT_TXT" \\
+  -c copy \\
+  -avoid_negative_ts make_zero \\
+  -use_editlist 0 \\
+  "$TMP_MP4"
 
-echo "==> [Step 2/2] Injecting Apple metadata, chapters, and soft WebVTT subtitles..."
+echo "==> [Step 2/2] Injecting metadata & chapters markers..."
 ffmpeg -y -loglevel warning \\
-  -i "$TMP_MP4" -i "$META_TXT" -i "$META_VTT" \\
-  -map 0:v -map 0:a -map 2:s \\
+  -i "$TMP_MP4" -i "$META_TXT" \\
+  -map 0:v:0 -map 0:a:0 \\
   -map_metadata 1 -map_chapters 1 \\
-  -c:v copy -c:a copy -c:s mov_text \\
-  -metadata:s:0 language=eng \\
-  -disposition:s:0 default \\
+  -dn \\
+  -c copy \\
+  -avoid_negative_ts make_zero \\
   -movflags +faststart \\
   "$OUT_MP4"
 
