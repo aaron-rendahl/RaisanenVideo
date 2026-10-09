@@ -341,20 +341,24 @@ echo "==> [Phase 3] Scene extractions and black spacers generated successfully!"
     master_script_path.write_text(master_content)
     master_script_path.chmod(0o755)
     return master_script_path
-  
+
 def write_concat_script(
     vid: str,
-    clip_id: str,
+    clip: Dict[str, Any],
     concat_txt_path: Path,
     meta_txt_path: Path,
     meta_vtt_path: Path,
-    out_mp4_path: Path,
     script_dir: Path
 ) -> Path:
     """Generates a per-clip concat script for stream copy and metadata injection."""
     script_dir.mkdir(parents=True, exist_ok=True)
-    concat_script_path = script_dir / f"{clip_id}_concat.sh"
+
+    clip_idx = clip['clip_idx']
+    clip_id = f"{vid}-{clip_idx}"
+
+    out_mp4_path = Path(clip['out_concat_path'])
     tmp_mp4_path = out_mp4_path.parent / f"{clip_id}-TEMP.mp4"
+    concat_script_path = script_dir / f"{clip_id}_concat.sh"
 
     script_content = f"""#!/usr/bin/env bash
 set -euo pipefail
