@@ -186,46 +186,6 @@ def build_ffmetadata_file(
     return out_meta_txt_path
 
 
-def format_vtt_timestamp(ms: int) -> str:
-    """Converts milliseconds to WebVTT timestamp string (HH:MM:SS.mmm)."""
-    hrs = ms // 3600000
-    ms %= 3600000
-    mins = ms // 60000
-    ms %= 60000
-    secs = ms // 1000
-    millis = ms % 1000
-    return f"{hrs:02d}:{mins:02d}:{secs:02d}.{millis:03d}"
-
-
-def build_webvtt_file(
-    scenes: List[Dict[str, Any]], 
-    out_vtt_path: Path
-) -> Path:
-    """Generates WebVTT subtitle file for Apple/QuickTime chapters."""
-    lines = ["WEBVTT", ""]
-    current_time_ms = 0
-
-    for idx, scene in enumerate(scenes, start=1):
-        duration_ms = int(round(scene['duration_sec'] * 1000))
-        start_ms = current_time_ms
-        end_ms = start_ms + duration_ms
-        
-        start_vtt = format_vtt_timestamp(start_ms)
-        end_vtt = format_vtt_timestamp(end_ms)
-        chapter_title = scene.get('title', f"Scene {idx}")
-        
-        lines.append(f"{idx}")
-        lines.append(f"{start_vtt} --> {end_vtt}")
-        lines.append(chapter_title)
-        lines.append("")
-        
-        current_time_ms = end_ms + 1000  # Account for 1s black spacer
-
-    out_vtt_path.parent.mkdir(parents=True, exist_ok=True)
-    out_vtt_path.write_text("\n".join(lines) + "\n")
-    return out_vtt_path
-
-
 # ==============================================================================
 # SECTION 3: Shell Script File Writers
 # ==============================================================================

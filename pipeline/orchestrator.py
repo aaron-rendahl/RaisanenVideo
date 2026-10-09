@@ -8,7 +8,6 @@ from pipeline.models import ArchiveData
 from pipeline.script_builders import (
     build_concat_manifest,
     build_ffmetadata_file,
-    build_webvtt_file,
     write_concat_script,
     write_extract_script,
     write_black_spacer_script,
