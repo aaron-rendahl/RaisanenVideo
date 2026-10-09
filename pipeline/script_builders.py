@@ -11,24 +11,26 @@ from typing import List, Dict, Any
 # ==============================================================================
 
 def build_utvideo_cmd(scene: dict) -> str:
-    """Builds Pass 1: Lossless Ut Video extraction command using bash variables."""
+    """Pass 1: Suppresses container crop, conditionally applies spatial crop, and extracts 4:2:2 Ut Video."""
     return (
         f'ffmpeg -y -loglevel warning \\\n'
         f'  -ss "$START_TIME" -to "$END_TIME" \\\n'
+        f'  -apply_crop 0 \\\n'
         f'  -i "$MASTER_MKV" \\\n'
         f'  -map 0:v:0 -map 0:a:0 -map_chapters -1 \\\n'
-        f'  -c:v utvideo -c:a pcm_s16le \\\n'
+        f'  ${{CROP_FILTER:+-vf "$CROP_FILTER" }}\\\n'
+        f'  -c:v utvideo -pix_fmt yuv422p -c:a pcm_s16le \\\n'
         f'  "$TEMP_MKV"'
     )
 
+
 def build_h264_cmd(scene: dict) -> str:
-    """Builds Pass 2: Standardized H.264 MP4 render command using bash variables."""
+    """Pass 2: Encodes pre-cropped 4:2:2 intermediate into standardized 4:2:0 H.264 MP4 with input layout override."""
     return (
         f'FADE="afade=t=in:st=0:d=0.005,afade=t=out:st=$FADE_OUT_START:d=0.005"\n'
         f'ffmpeg -y -loglevel warning \\\n'
         f'  -ch_layout stereo \\\n'
         f'  -i "$TEMP_MKV" \\\n'
-        f'  ${{CROP_FILTER:+-vf "$CROP_FILTER" }}\\\n'
         f'  -c:v libx264 -crf 22 -preset slow \\\n'
         f'  -force_key_frames "expr:eq(n,0)" -g 60 \\\n'
         f'  -pix_fmt yuv420p -tag:v avc1 \\\n'
@@ -319,7 +321,7 @@ def write_concat_script(
 ) -> Path:
     """Generates a per-clip concat script for stream copy and metadata injection."""
     script_dir.mkdir(parents=True, exist_ok=True)
-    concat_script_path = script_dir / f"{clip_id}_concat.sh"  # <--- Per-clip script name!
+    concat_script_path = script_dir / f"{clip_id}_concat.sh"
     tmp_mp4_path = out_mp4_path.parent / f"{clip_id}-TEMP.mp4"
 
     script_content = f"""#!/usr/bin/env bash
