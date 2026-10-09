@@ -1,10 +1,10 @@
 import os
 import subprocess
 import tempfile
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from xml.dom import minidom
-from models import ArchiveData, Clip, Subchapter
+from .models import ArchiveData, Clip, Subchapter
 
 def read_mkv_metadata(mkv_path: str | Path) -> ArchiveData:
     """Subprocess I/O wrapper: extracts raw XML chapter/tag strings from an MKV file
@@ -195,11 +195,6 @@ def parse_crop_string(crop_str: str):
     except ValueError:
         pass
     return None
-
-import xml.etree.ElementTree as ET
-import xml.dom.minidom as minidom
-from models import ArchiveData
-
 
 def generate_mkv_chapters_and_tags(data: ArchiveData):
     """Generates Matroska XML chapters and tags from ArchiveData."""

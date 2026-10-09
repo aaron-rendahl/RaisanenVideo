@@ -1,5 +1,4 @@
-from models import ArchiveData, Clip, Subchapter
-
+from .models import ArchiveData, Clip, Subchapter
 
 def read_tape_spec(text_content: str) -> ArchiveData:
     global_crop = ""
