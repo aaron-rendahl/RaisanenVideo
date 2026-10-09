@@ -204,9 +204,9 @@ def build_crop_filter(crop_str: str) -> str:
         pass
     return ""
 
-def write_extract_script(
+def write_extract_scripts(
     vid: str,
-    clips: list[dict],
+    scenes: list[dict],
     script_dir: Path,
     scenes_dir: Path,
 ) -> None:
@@ -214,14 +214,14 @@ def write_extract_script(
     script_dir = script_dir.resolve()
     template = jinja_env.get_template("extract_scene.sh.j2")
 
-    for clip in clips:
-        for scene in clip["scenes"]:
-            scene_sh_path = script_dir / f"{scene['scene_id']}.sh"
+    for scene in scenes:
+        short_id = scene["scene_id"].removeprefix(f"{vid}-")
+        scene_sh_path = script_dir / f"{short_id}.sh"
 
-            content = template.render(scene=scene)
+        content = template.render(scene=scene)
 
-            scene_sh_path.write_text(content)
-            scene_sh_path.chmod(0o755)
+        scene_sh_path.write_text(content)
+        scene_sh_path.chmod(0o755)
 
 def write_black_spacer_script(
     vid: str,
@@ -235,7 +235,7 @@ def write_black_spacer_script(
     clip_idx = clip["clip_idx"]
     clip_id = f"{vid}-{clip_idx}"
 
-    spacer_sh_path = script_dir / f"{clip_id}-black.sh"
+    spacer_sh_path = script_dir / f"{clip_idx}-black.sh"
     black_spacer_path = Path(clip["black_spacer_path"]).resolve()
 
     template = jinja_env.get_template("black_spacer.sh.j2")
@@ -268,7 +268,7 @@ def write_concat_script(
 
     out_mp4_path = Path(clip["out_mp4_path"]).resolve()
     tmp_mp4_path = out_mp4_path.parent / f"{clip_id}-TEMP.mp4"
-    concat_sh_path = script_dir / f"{clip_id}-concat.sh"
+    concat_sh_path = script_dir / f"{clip_idx}-concat.sh"
 
     template = jinja_env.get_template("concat.sh.j2")
     content = template.render(

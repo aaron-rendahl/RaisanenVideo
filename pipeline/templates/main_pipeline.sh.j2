@@ -2,40 +2,39 @@
 set -euo pipefail
 
 # ==============================================================================
-# Main Pipeline Orchestrator for: {{ vid }}
+# Master Pipeline Orchestrator for: {{ vid }}
 # Generated automatically by pipeline architecture
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=================================================================="
-echo " Starting Full Processing Pipeline for: {{ vid }}"
+echo " Starting Clip-by-Clip Pipeline for: {{ vid }}"
 echo "=================================================================="
 
-# ------------------------------------------------------------------------------
-# Phase 1: Black Spacer Generation
-# ------------------------------------------------------------------------------
 {% for clip in clips %}
-echo "==> Generating black spacer for clip {{ clip.clip_idx }}..."
-bash "$SCRIPT_DIR/{{ vid }}-{{ clip.clip_idx }}-black.sh"
-{% endfor %}
+# ------------------------------------------------------------------------------
+# CLIP {{ clip.clip_idx }}: {{ clip.title or "Clip " ~ clip.clip_idx }}
+# ------------------------------------------------------------------------------
+echo "==> [START] Processing Clip {{ clip.clip_idx }}/{{ clips|length }}..."
 
-# ------------------------------------------------------------------------------
-# Phase 2: Scene Extractions
-# ------------------------------------------------------------------------------
-{% for clip in clips %}
+# Step 1: Extract Scenes for Clip {{ clip.clip_idx }}
 {% for scene in clip.scenes %}
-echo "==> Extracting scene: {{ scene.scene_id }}..."
-bash "$SCRIPT_DIR/{{ scene.scene_id }}.sh"
-{% endfor %}
+{% set short_scene_id = scene.scene_id | replace(vid ~ '-', '') %}
+echo "  -> Extracting scene: {{ short_scene_id }}..."
+bash "$SCRIPT_DIR/{{ short_scene_id }}.sh"
 {% endfor %}
 
-# ------------------------------------------------------------------------------
-# Phase 3: Clip Concatenation & Metadata Tagging
-# ------------------------------------------------------------------------------
-{% for clip in clips %}
-echo "==> Concatenating clip {{ clip.clip_idx }}..."
-bash "$SCRIPT_DIR/{{ vid }}-{{ clip.clip_idx }}-concat.sh"
+# Step 2: Black Spacer for Clip {{ clip.clip_idx }}
+echo "  -> Generating black spacer..."
+bash "$SCRIPT_DIR/clip_{{ clip.clip_idx }}-black.sh"
+
+# Step 3: Concatenate & Tag Clip {{ clip.clip_idx }}
+echo "  -> Concatenating and tagging..."
+bash "$SCRIPT_DIR/clip_{{ clip.clip_idx }}-concat.sh"
+
+echo "==> [COMPLETE] Clip {{ clip.clip_idx }} finished successfully!"
+echo ""
 {% endfor %}
 
 echo "=================================================================="

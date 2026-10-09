@@ -9,7 +9,7 @@ from pipeline.script_builders import (
     build_concat_manifest,
     build_ffmetadata_file,
     write_concat_script,
-    write_extract_script,
+    write_extract_scripts,
     write_black_spacer_script,
     write_main_script
 )
@@ -63,12 +63,6 @@ def generate_pipeline(
         f"--> Parsed {total_scenes} total scene(s) across {len(clips)} clip(s)."
     )
 
-    # 1. Generate scene extraction scripts
-    write_extract_script(
-        vid=vid, clips=clips, script_dir=dirs.scripts, scenes_dir=dirs.scenes
-    )
-
-    # 2. Build manifests and per-clip scripts
     for clip in clips:
         clip_idx = clip["clip_idx"]
         clip_id = f"{vid}-{clip_idx}"
@@ -82,6 +76,13 @@ def generate_pipeline(
         build_concat_manifest(clip_scenes, black_spacer_path, manifest_path)
         build_ffmetadata_file(
             clip_scenes, meta_txt_path, title=clean_clip_title
+        )
+
+        write_extract_scripts(
+            vid=vid, 
+            scenes=clip_scenes, 
+            script_dir=dirs.scripts, 
+            scenes_dir=dirs.scenes
         )
 
         write_black_spacer_script(
