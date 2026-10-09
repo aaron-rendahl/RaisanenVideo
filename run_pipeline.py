@@ -44,13 +44,12 @@ def main():
     print("==================================================================")
 
     try:
-        master_script = generate_pipeline(
+        generate_pipeline(
             vid=args.vid,
             base_dir=args.base_dir,
             fps=args.fps,
             resolution=args.resolution,
         )
-        print(f"--> Master pipeline script generated at: {master_script}")
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)

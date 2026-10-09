@@ -11,9 +11,10 @@ from pipeline.script_builders import (
     build_webvtt_file,
     write_concat_script,
     write_extract_script,
+    write_black_spacer_script,
+    write_main_script
 )
 from pipeline.spec import read_tape_spec
-
 
 def generate_pipeline(
     vid: str, base_dir: Path, fps: str, resolution: str
@@ -63,11 +64,12 @@ def generate_pipeline(
         f"--> Parsed {total_scenes} total scene(s) across {len(clips)} clip(s)."
     )
 
+    # 1. Generate scene extraction scripts
     write_extract_script(
         vid=vid, clips=clips, script_dir=dirs.scripts, scenes_dir=dirs.scenes
     )
 
-    master_body_lines = []
+    # 2. Build manifests and per-clip scripts
     for clip in clips:
         clip_idx = clip["clip_idx"]
         clip_id = f"{vid}-{clip_idx}"
@@ -79,9 +81,19 @@ def generate_pipeline(
         clean_clip_title = clip.get("title") or f"Clip_{clip_idx}"
 
         build_concat_manifest(clip_scenes, black_spacer_path, manifest_path)
-        build_ffmetadata_file(clip_scenes, meta_txt_path, title=clean_clip_title)
+        build_ffmetadata_file(
+            clip_scenes, meta_txt_path, title=clean_clip_title
+        )
 
-        clip_concat_sh = write_concat_script(
+        write_black_spacer_script(
+            vid=vid,
+            clip=clip,
+            script_dir=dirs.scripts,
+            fps=fps,
+            resolution=resolution,
+        )
+
+        write_concat_script(
             vid=vid,
             clip=clip,
             concat_txt_path=manifest_path,
@@ -89,40 +101,13 @@ def generate_pipeline(
             script_dir=dirs.scripts,
         )
 
-        master_body_lines.append("# " + "-" * 78)
-        master_body_lines.append(f"# CLIP {clip_idx}: {clean_clip_title}")
-        master_body_lines.append("# " + "-" * 78)
-        master_body_lines.append("(")
-        master_body_lines.append(f'  SCRIPT_DIR="{dirs.scripts.resolve()}"')
-        master_body_lines.append(
-            f'  echo "==> [START] Processing Clip {clip_idx}/{len(clips)}: {clean_clip_title}"'
-        )
-
-        for scene in clip_scenes:
-            master_body_lines.append(
-                f'  bash "$SCRIPT_DIR/{scene["scene_id"]}.sh"'
-            )
-
-        master_body_lines.append(f'  bash "$SCRIPT_DIR/{clip_id}-black.sh"')
-        master_body_lines.append(
-            f'  bash "$SCRIPT_DIR/{clip_concat_sh.name}"'
-        )
-        master_body_lines.append(
-            f'  echo "==> [COMPLETE] Clip {clip_idx} finished successfully!"'
-        )
-        master_body_lines.append(")")
-        master_body_lines.append("")
-
-    master_script_path = dirs.scripts / "01_run_pipeline.sh"
-    content = (
-        f"#!/usr/bin/env bash\nset -euo pipefail\n\n"
-        f'echo "==> Launching clip-by-clip pipeline for {vid}..."\n\n'
-        + "\n".join(master_body_lines)
-        + '\necho "=================================================================="\n'
-        + 'echo "  [SUCCESS] All clips built, concatenated, and tagged!"\n'
-        + 'echo "=================================================================="\n'
+    # 3. Render master execution script via Jinja2
+    main_script_path = write_main_script(
+        vid=vid,
+        clips=clips,
+        script_dir=dirs.scripts,
     )
+    
+    print(f"--> Main pipeline script generated at: {dirs.rel_path(main_script_path)}")
 
-    master_script_path.write_text(content)
-    master_script_path.chmod(0o755)
-    return master_script_path
+    return main_script_path

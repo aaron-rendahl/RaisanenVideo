@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Main Pipeline Orchestrator for: {{ vid }}
+# Generated automatically by pipeline architecture
+# ==============================================================================
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+echo "=================================================================="
+echo " Starting Full Processing Pipeline for: {{ vid }}"
+echo "=================================================================="
+
+# ------------------------------------------------------------------------------
+# Phase 1: Black Spacer Generation
+# ------------------------------------------------------------------------------
+{% for clip in clips %}
+echo "==> Generating black spacer for clip {{ clip.clip_idx }}..."
+bash "$SCRIPT_DIR/{{ vid }}-{{ clip.clip_idx }}-black.sh"
+{% endfor %}
+
+# ------------------------------------------------------------------------------
+# Phase 2: Scene Extractions
+# ------------------------------------------------------------------------------
+{% for clip in clips %}
+{% for scene in clip.scenes %}
+echo "==> Extracting scene: {{ scene.scene_id }}..."
+bash "$SCRIPT_DIR/{{ scene.scene_id }}.sh"
+{% endfor %}
+{% endfor %}
+
+# ------------------------------------------------------------------------------
+# Phase 3: Clip Concatenation & Metadata Tagging
+# ------------------------------------------------------------------------------
+{% for clip in clips %}
+echo "==> Concatenating clip {{ clip.clip_idx }}..."
+bash "$SCRIPT_DIR/{{ vid }}-{{ clip.clip_idx }}-concat.sh"
+{% endfor %}
+
+echo "=================================================================="
+echo " Pipeline Execution Complete for {{ vid }}!"
+echo "=================================================================="

@@ -244,92 +244,51 @@ def build_crop_filter(crop_str: str) -> str:
         pass
     return ""
 
-
-
-
 def write_extract_script(
     vid: str,
-    clips: List[Dict[str, Any]],
+    clips: list[dict],
     script_dir: Path,
-    scenes_dir: Path
+    scenes_dir: Path,
 ) -> None:
-    """Generates individual scene processing scripts and clip-level black spacer scripts."""
-    script_dir.mkdir(parents=True, exist_ok=True)
-    scenes_dir.mkdir(parents=True, exist_ok=True)
+    """Generates individual scene extraction shell scripts using Jinja2."""
+    script_dir = script_dir.resolve()
+    template = jinja_env.get_template("extract_scene.sh.j2")
 
     for clip in clips:
-        clip_idx = clip['clip_idx']
-        clip_id = f"{vid}-{clip_idx}"
-
-        # 1. Generate individual scene extraction scripts
-        for scene in clip['scenes']:
+        for scene in clip["scenes"]:
             scene_sh_path = script_dir / f"{scene['scene_id']}.sh"
 
-            duration = scene['duration_sec']
-            fade_out_start = max(0.0, round(duration - 0.005, 3))
-            raw_crop = scene.get('crop', '')
-            crop_val = build_crop_filter(str(raw_crop) if raw_crop else "")
-            title_val = scene.get('title', '')
-            reel_title_val = scene.get('reel_title', '')
+            content = template.render(scene=scene)
 
-            utvideo_cmd = build_utvideo_cmd(scene)
-            h264_cmd = build_h264_cmd(scene)
-
-            scene_sh_content = f"""#!/usr/bin/env bash
-set -euo pipefail
-
-# ==============================================================================
-# Scene Processing: {scene['scene_id']}
-# ==============================================================================
-
-# Input & Staging Paths
-MASTER_MKV="{scene['master_mkv_path']}"
-TEMP_MKV="{scene['temp_mkv_path']}"
-OUT_MP4="{scene['out_mp4_path']}"
-
-# Timecodes & Durations
-START_TIME="{scene['start_time']}"
-END_TIME="{scene['end_time']}"
-DURATION="{duration}"
-FADE_OUT_START="{fade_out_start:.3f}"
-
-# Video & Metadata Parameters
-CROP_FILTER="{crop_val}"
-TITLE="{title_val}"
-REEL_TITLE="{reel_title_val}"
-
-echo "==> Processing Scene: {scene['scene_id']}"
-echo "  -> [1/2] Lossless extraction (Ut Video)..."
-{utvideo_cmd}
-
-echo "  -> [2/2] Standardized H.264 render..."
-{h264_cmd}
-
-echo "  -> Cleaning up temporary intermediate..."
-rm -f "$TEMP_MKV"
-"""
-            scene_sh_path.write_text(scene_sh_content)
+            scene_sh_path.write_text(content)
             scene_sh_path.chmod(0o755)
 
-        # 2. Generate clip-level black spacer script (referencing clip's first scene)
-        first_scene = clip['scenes'][0]
-        spacer_mp4_path = Path(clip['black_spacer_path'])
-        spacer_sh_path = script_dir / f"{clip_id}-black.sh"
+def write_black_spacer_script(
+    vid: str,
+    clip: dict,
+    script_dir: Path,
+    fps: str = "30000/1001",
+    resolution: str = "720x480",
+) -> Path:
+    """Generates a dedicated shell script to create a 1-second black spacer for a clip."""
+    script_dir = script_dir.resolve()
+    clip_idx = clip["clip_idx"]
+    clip_id = f"{vid}-{clip_idx}"
 
-        spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
+    spacer_sh_path = script_dir / f"{clip_id}-black.sh"
+    black_spacer_path = Path(clip["black_spacer_path"]).resolve()
 
-        spacer_sh_content = f"""#!/usr/bin/env bash
-set -euo pipefail
+    template = jinja_env.get_template("black_spacer.sh.j2")
+    content = template.render(
+        clip_id=clip_id,
+        black_spacer_path=black_spacer_path,
+        fps=fps,
+        resolution=resolution,
+    )
 
-# ==============================================================================
-# Black Spacer Generation: {clip_id}-black
-# ==============================================================================
-
-echo "==> Generating Black Spacer: {clip_id}-black.mp4"
-{spacer_cmd}
-"""
-        spacer_sh_path.write_text(spacer_sh_content)
-        spacer_sh_path.chmod(0o755)
+    spacer_sh_path.write_text(content)
+    spacer_sh_path.chmod(0o755)
+    return spacer_sh_path
 
 def write_concat_script(
     vid: str,
@@ -363,3 +322,22 @@ def write_concat_script(
     concat_sh_path.write_text(content)
     concat_sh_path.chmod(0o755)
     return concat_sh_path
+  
+def write_main_script(
+    vid: str,
+    clips: list[dict],
+    script_dir: Path,
+) -> Path:
+    """Generates the main main execution shell script using Jinja2."""
+    script_dir = script_dir.resolve()
+    main_sh_path = script_dir / "01_run_pipeline.sh"
+
+    template = jinja_env.get_template("main_pipeline.sh.j2")
+    content = template.render(
+        vid=vid,
+        clips=clips,
+    )
+
+    main_sh_path.write_text(content)
+    main_sh_path.chmod(0o755)
+    return main_sh_path

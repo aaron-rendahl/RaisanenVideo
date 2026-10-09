@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Black Spacer Generation: {{ clip_id }}-black
+# Duration: 1.0s spacer clip
+# ==============================================================================
+
+OUT_MP4="{{ black_spacer_path }}"
+
+echo "==> Generating black spacer clip: {{ clip_id }}-black.mp4..."
+
+ffmpeg -y -loglevel warning \
+  -f lavfi -i color=c=black:s={{ resolution }}:r={{ fps }} \
+  -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 \
+  -t 1.0 \
+  -c:v libx264 -crf 22 -preset slow \
+  -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \
+  -c:a aac -b:a 192k \
+  -force_key_frames "expr:gte(t,n_forced*1)" \
+  -avoid_negative_ts make_zero \
+  -use_editlist 0 \
+  "$OUT_MP4"
