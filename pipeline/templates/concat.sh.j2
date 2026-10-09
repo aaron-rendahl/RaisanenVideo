@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Concat & Metadata Script for Clip: {{ clip.clip_id }}
+# ==============================================================================
+
+CONCAT_TXT="{{ concat_txt_path }}"
+META_TXT="{{ meta_txt_path }}"
+TMP_MP4="{{ tmp_mp4_path }}"
+OUT_MP4="{{ out_mp4_path }}"
+
+echo "==> [1/2] Concatenating scenes into temporary stream..."
+ffmpeg -y -loglevel warning \
+  -fflags +genpts \
+  -f concat -safe 0 \
+  -i "$CONCAT_TXT" \
+  -c copy \
+  -avoid_negative_ts make_zero \
+  -use_editlist 0 \
+  "$TMP_MP4"
+
+echo "==> [2/2] Injecting metadata and chapter tags..."
+ffmpeg -y -loglevel warning \
+  -i "$TMP_MP4" -i "$META_TXT" \
+  -map 0:v:0 -map 0:a:0 \
+  -map_metadata 1 -map_chapters 1 \
+  -sn -dn \
+  -c copy \
+  -avoid_negative_ts make_zero \
+  -use_editlist 0 \
+  -movflags +faststart \
+  "$OUT_MP4"
+
+echo "==> [CLEANUP] Removing intermediate temp file..."
+rm -f "$TMP_MP4"

@@ -75,22 +75,17 @@ def generate_pipeline(
 
         manifest_path = dirs.scripts / f"{clip_id}.txt"
         meta_txt_path = dirs.metadata / f"{clip_id}.txt"
-        meta_vtt_path = dirs.metadata / f"{clip_id}.vtt"
         black_spacer_path = Path(clip["black_spacer_path"])
         clean_clip_title = clip.get("title") or f"Clip_{clip_idx}"
 
         build_concat_manifest(clip_scenes, black_spacer_path, manifest_path)
-        build_ffmetadata_file(
-            clip_scenes, meta_txt_path, title=clean_clip_title
-        )
-        build_webvtt_file(clip_scenes, meta_vtt_path)
+        build_ffmetadata_file(clip_scenes, meta_txt_path, title=clean_clip_title)
 
         clip_concat_sh = write_concat_script(
             vid=vid,
             clip=clip,
             concat_txt_path=manifest_path,
             meta_txt_path=meta_txt_path,
-            meta_vtt_path=meta_vtt_path,
             script_dir=dirs.scripts,
         )
 

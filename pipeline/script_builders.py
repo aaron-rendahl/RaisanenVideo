@@ -5,6 +5,15 @@ script_builders.py - FFmpeg Command & Shell Script Generators for Modular Video 
 
 from pathlib import Path
 from typing import List, Dict, Any
+from jinja2 import Environment, FileSystemLoader
+
+# Set up Jinja2 environment pointing to pipeline/templates
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+jinja_env = Environment(
+    loader=FileSystemLoader(TEMPLATES_DIR),
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
 
 # ==============================================================================
 # SECTION 1: Low-Level FFmpeg Command Builders
@@ -324,60 +333,33 @@ echo "==> Generating Black Spacer: {clip_id}-black.mp4"
 
 def write_concat_script(
     vid: str,
-    clip: Dict[str, Any],
+    clip: dict,
     concat_txt_path: Path,
     meta_txt_path: Path,
-    meta_vtt_path: Path,
-    script_dir: Path
+    script_dir: Path,
 ) -> Path:
-    """Generates a per-clip concat script for stream copy and metadata injection."""
-    script_dir.mkdir(parents=True, exist_ok=True)
-
-    clip_idx = clip['clip_idx']
+    """Generates the per-clip concatenation and metadata tagging script using Jinja2."""
+    clip_idx = clip["clip_idx"]
     clip_id = f"{vid}-{clip_idx}"
 
-    out_mp4_path = Path(clip['out_concat_path'])
+    # Standardize all paths upfront
+    script_dir = script_dir.resolve()
+    concat_txt_path = concat_txt_path.resolve()
+    meta_txt_path = meta_txt_path.resolve()
+
+    out_mp4_path = Path(clip["out_mp4_path"]).resolve()
     tmp_mp4_path = out_mp4_path.parent / f"{clip_id}-TEMP.mp4"
-    concat_script_path = script_dir / f"{clip_id}_concat.sh"
+    concat_sh_path = script_dir / f"{clip_id}-concat.sh"
 
-    script_content = f"""#!/usr/bin/env bash
-set -euo pipefail
+    template = jinja_env.get_template("concat.sh.j2")
+    content = template.render(
+        clip=clip,
+        concat_txt_path=concat_txt_path,
+        meta_txt_path=meta_txt_path,
+        tmp_mp4_path=tmp_mp4_path,
+        out_mp4_path=out_mp4_path,
+    )
 
-# Phase 4: Concat, Metadata Tagging & Apple Faststart for {clip_id}
-CONCAT_TXT="{concat_txt_path.resolve()}"
-META_TXT="{meta_txt_path.resolve()}"
-META_VTT="{meta_vtt_path.resolve()}"
-TMP_MP4="{tmp_mp4_path.resolve()}"
-OUT_MP4="{out_mp4_path.resolve()}"
-
-echo "==> [Step 1/2] Zero-loss stream copy concatenation for {clip_id}..."
-ffmpeg -y -loglevel warning \\
-  -fflags +genpts \\
-  -f concat -safe 0 \\
-  -i "$CONCAT_TXT" \\
-  -c copy \\
-  -avoid_negative_ts make_zero \\
-  -use_editlist 0 \\
-  "$TMP_MP4"
-
-echo "==> [Step 2/2] Injecting metadata & chapters markers..."
-ffmpeg -y -loglevel warning \\
-  -i "$TMP_MP4" -i "$META_TXT" \\
-  -map 0:v:0 -map 0:a:0 \\
-  -map_metadata 1 -map_chapters 1 \\
-  -dn \\
-  -c copy \\
-  -avoid_negative_ts make_zero \\
-  -movflags +faststart \\
-  -use_editlist 0 \\
-  "$OUT_MP4"
-
-echo "==> Cleaning up staging file..."
-rm -f "$TMP_MP4"
-
-echo "==> Success! Output generated at: $OUT_MP4"
-"""
-
-    concat_script_path.write_text(script_content)
-    concat_script_path.chmod(0o755)
-    return concat_script_path
+    concat_sh_path.write_text(content)
+    concat_sh_path.chmod(0o755)
+    return concat_sh_path

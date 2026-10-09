@@ -47,7 +47,7 @@ def to_builder_data(
         clip_crop = clip.crop or archive.global_crop
         safe_clip_title = sanitize_filename(clip.title)
 
-        out_concat_path = str((clips_dir / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
+        clip_mp4_path = str((clips_dir / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
         clip_spacer_path = str((scenes_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
 
         items_to_process = clip.subchapters if clip.subchapters else [clip]
@@ -62,7 +62,7 @@ def to_builder_data(
             duration_sec = max(0.0, end_sec - start_sec)
 
             temp_mkv_path = str((scenes_dir / f'{scene_id}_temp.mkv').resolve())
-            out_mp4_path = str((scenes_dir / f'{scene_id}.mp4').resolve())
+            scene_mp4_path = str((scenes_dir / f'{scene_id}.mp4').resolve())
 
             clip_scenes.append({
                 'scene_id': scene_id,
@@ -71,7 +71,7 @@ def to_builder_data(
                 'end_time': item.end,
                 'duration_sec': duration_sec,
                 'temp_mkv_path': temp_mkv_path,
-                'out_mp4_path': out_mp4_path,
+                'out_mp4_path': scene_mp4_path,
                 'crop': clip_crop,
                 'title': item.title,
                 'reel_title': overall_title or vid,
@@ -84,7 +84,7 @@ def to_builder_data(
             'title': clip.title,
             'crop': clip_crop,
             'black_spacer_path': clip_spacer_path,
-            'out_concat_path': out_concat_path,
+            'out_mp4_path': clip_mp4_path,
             'scenes': clip_scenes
         })
 
