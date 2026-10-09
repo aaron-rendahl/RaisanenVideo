@@ -112,12 +112,7 @@ def to_builder_scenes(
 
         for item in items_to_process:
             clean_title = sanitize_filename(item.title)
-            
-            # Formulate scene_id based on multi-clip vs. single-clip
-            if archive.is_multi_clip:
-                scene_id = f"{vid}-{clip.idx}-{item.idx}-{clean_title}"
-            else:
-                scene_id = f"{vid}-{item.idx}-{clean_title}"
+            scene_id = f"{vid}-{item.idx}-{clean_title}"
 
             start_sec = timestamp_to_seconds(item.start)
             end_sec = timestamp_to_seconds(item.end)
