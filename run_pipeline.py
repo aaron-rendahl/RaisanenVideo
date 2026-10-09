@@ -176,20 +176,25 @@ def main():
         master_body_lines.append(f"# " + "-" * 78)
         master_body_lines.append("(")
         master_body_lines.append(
+            f'  SCRIPT_DIR="{dirs["scripts"].resolve()}"'
+        )
+        master_body_lines.append(
             f'  echo "==> [START] Processing Clip {clip_idx}/{len(clips)}: {clean_clip_title}"'
         )
 
-        # Step A: Run scene extractions for this clip
+        # Step A: Run scene extractions for this clip using $SCRIPT_DIR
         for scene in clip_scenes:
-            scene_sh = dirs["scripts"] / f"{scene['scene_id']}.sh"
-            master_body_lines.append(f'  bash "{scene_sh.resolve()}"')
+            master_body_lines.append(
+                f'  bash "$SCRIPT_DIR/{scene["scene_id"]}.sh"'
+            )
 
-        # Step B: Run black spacer generation for this clip
-        spacer_sh = dirs["scripts"] / f"{clip_id}-black.sh"
-        master_body_lines.append(f'  bash "{spacer_sh.resolve()}"')
+        # Step B: Run black spacer generation for this clip using $SCRIPT_DIR
+        master_body_lines.append(f'  bash "$SCRIPT_DIR/{clip_id}-black.sh"')
 
-        # Step C: Concatenate scenes + spacer & inject metadata
-        master_body_lines.append(f'  bash "{clip_concat_sh.resolve()}"')
+        # Step C: Concatenate scenes + spacer & inject metadata using $SCRIPT_DIR
+        master_body_lines.append(
+            f'  bash "$SCRIPT_DIR/{clip_concat_sh.name}"'
+        )
 
         master_body_lines.append(
             f'  echo "==> [COMPLETE] Clip {clip_idx} finished successfully!"'
