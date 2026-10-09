@@ -306,9 +306,11 @@ rm -f "$TEMP_MKV"
             master_body.append(f'bash "{scene_sh_path.resolve()}"')
 
         # 2b. Generate black spacer script directly from clip object (no more first_scene workaround!)
+        first_scene = clip['scenes'][0]
         spacer_mp4_path = Path(clip['black_spacer_path'])
         spacer_sh_path = script_dir / f"{clip_id}-black.sh"
-        spacer_cmd = build_black_spacer_cmd(clip, spacer_mp4_path)
+        
+        spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
 
         spacer_sh_content = f"""#!/usr/bin/env bash
 set -euo pipefail
