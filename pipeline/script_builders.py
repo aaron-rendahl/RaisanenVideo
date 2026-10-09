@@ -15,7 +15,7 @@ def build_utvideo_cmd(scene: dict) -> str:
     return (
         f'ffmpeg -y -loglevel warning \\\n'
         f'  -ss "$START_TIME" -to "$END_TIME" \\\n'
-        f'  -apply_crop 0 \\\n'
+        f'  -apply_cropping 0 \\\n'
         f'  -i "$MASTER_MKV" \\\n'
         f'  -map 0:v:0 -map 0:a:0 -map_chapters -1 \\\n'
         f'  ${{CROP_FILTER:+-vf "$CROP_FILTER" }}\\\n'
@@ -43,26 +43,63 @@ def build_h264_cmd(scene: dict) -> str:
     )
 
 def build_black_spacer_cmd(scene: dict, out_spacer_path: Path) -> str:
-    """Generates a 1-second black spacer matched to the post-crop resolution of a clip."""
-    raw_crop = scene.get('crop', '')
-    # Base NTSC dimensions
+    """Generates a 1-second black spacer dynamically matched to the scene's exact
+
+    rendered pixel dimensions, sample aspect ratio (SAR), and frame rate.
+    """
+    out_scene_path = Path(scene["out_mp4_path"])
+
+    # Fallback defaults calculated from spec geometry math
+    raw_crop = str(scene.get("crop", "")).strip()
     w, h = 720, 480
-    
     if raw_crop:
+        parts = [int(p) for p in raw_crop.split() if p.isdigit()]
+        if len(parts) == 4:
+            left, right, top, bottom = parts
+            w = 720 - (left + right)
+            h = 480 - (top + bottom)
+
+    sar = "74/89"  # Default NTSC/ITU SAR
+    fps = str(scene.get("fps") or scene.get("r_frame_rate") or "30000/1001")
+
+    # If the scene MP4 has been rendered, probe its exact post-crop metadata
+    if out_scene_path.exists():
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,sample_aspect_ratio,r_frame_rate",
+            "-of",
+            "json",
+            str(out_scene_path),
+        ]
         try:
-            delimiter = "|" if "|" in str(raw_crop) else " "
-            parts = [int(p.strip()) for p in str(raw_crop).split(delimiter) if p.strip()]
-            if len(parts) == 4:
-                left, right, top, bottom = parts
-                w = 720 - (left + right)
-                h = 480 - (top + bottom)
-        except (ValueError, TypeError):
+            res = subprocess.run(
+                cmd, capture_output=True, text=True, check=True
+            )
+            data = json.loads(res.stdout)
+            stream = data.get("streams", [{}])[0]
+
+            w = stream.get("width", w)
+            h = stream.get("height", h)
+            probed_sar = stream.get("sample_aspect_ratio")
+            if probed_sar and probed_sar != "0:1" and probed_sar != "N/A":
+                sar = probed_sar
+
+            probed_fps = stream.get("r_frame_rate")
+            if probed_fps and probed_fps != "0/0":
+                fps = probed_fps
+        except Exception:
             pass
 
     return (
         f'ffmpeg -y -loglevel warning \\\n'
-        f'  -f lavfi -i "color=c=black:s={w}x{h}:r=29.97:d=1.0" \\\n'
+        f'  -f lavfi -i "color=c=black:s={w}x{h}:r={fps}:d=1.0" \\\n'
         f'  -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=48000" \\\n'
+        f'  -vf "setsar={sar}" \\\n'
         f'  -c:v libx264 -crf 22 -preset slow \\\n'
         f'  -pix_fmt yuv420p -tag:v avc1 \\\n'
         f'  -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \\\n'
@@ -187,19 +224,23 @@ def build_crop_filter(crop_str: str) -> str:
         pass
     return ""
 
+from pathlib import Path
+from typing import Any, Dict, List
+
+
 def write_extract_script(
     vid: str,
     scenes: List[Dict[str, Any]],
     script_dir: Path,
     scenes_dir: Path
 ) -> Path:
-    """Generates 01_extract_scenes.sh, per-clip black spacer scripts, and individual scene scripts."""
+    """Generates 01_extract_scenes.sh, per-clip black spacer scripts, and individual scene scripts
+
+    with black spacer generation interleaved after scene extractions.
+    """
     script_dir.mkdir(parents=True, exist_ok=True)
     scenes_dir.mkdir(parents=True, exist_ok=True)
     master_script_path = script_dir / "01_extract_scenes.sh"
-    
-    spacer_script_calls = []
-    individual_script_calls = []
 
     # 1. Group scenes strictly by primary clip index ('01', '02', ..., '13')
     clip_groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -207,40 +248,14 @@ def write_extract_script(
         if "clip_idx" in scene and scene["clip_idx"]:
             raw_idx = str(scene["clip_idx"])
         else:
-            # Parse from scene_id: strip vid prefix -> take first token -> take portion before dot
             id_suffix = scene["scene_id"].replace(f"{vid}-", "")
             raw_token = id_suffix.split("-")[0] if "-" in id_suffix else "01"
-            raw_idx = raw_token.split(".")[0]  # <--- Strips subchapters like .1, .01
+            raw_idx = raw_token.split(".")[0]
 
         clip_idx = raw_idx.zfill(2) if raw_idx.isdigit() else raw_idx
         clip_groups.setdefault(clip_idx, []).append(scene)
 
-    # 2. Generate dedicated scripts for each clip's black spacer
-    for clip_idx in sorted(clip_groups.keys()):
-        clip_scenes = clip_groups[clip_idx]
-        clip_id = f"{vid}-{clip_idx}"
-
-        spacer_mp4_path = scenes_dir / f"{clip_id}-black.mp4"
-        spacer_sh_path = script_dir / f"{clip_id}-black.sh"
-        
-        first_scene = clip_scenes[0]
-        spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
-
-        spacer_sh_content = f"""#!/usr/bin/env bash
-set -euo pipefail
-
-# ==============================================================================
-# Black Spacer Generation: {clip_id}-black
-# ==============================================================================
-
-echo "==> Generating Black Spacer: {clip_id}-black.mp4"
-{spacer_cmd}
-"""
-        spacer_sh_path.write_text(spacer_sh_content)
-        spacer_sh_path.chmod(0o755)
-        spacer_script_calls.append(f'bash "{spacer_sh_path.resolve()}"')
-
-    # 3. Generate individual scene extraction scripts
+    # 2. Generate individual scene extraction scripts
     for scene in scenes:
         scene_sh_name = f"{scene['scene_id']}.sh"
         scene_sh_path = script_dir / scene_sh_name
@@ -290,20 +305,51 @@ rm -f "$TEMP_MKV"
 """
         scene_sh_path.write_text(scene_sh_content)
         scene_sh_path.chmod(0o755)
-        individual_script_calls.append(f'bash "{scene_sh_path.resolve()}"')
+
+    # 3. Generate black spacer scripts and interleave master execution steps
+    master_body = []
+
+    for clip_idx in sorted(clip_groups.keys()):
+        clip_scenes = clip_groups[clip_idx]
+        clip_id = f"{vid}-{clip_idx}"
+
+        # 3a. Add calls for all scene extractions in this clip group
+        for scene in clip_scenes:
+            scene_sh_path = script_dir / f"{scene['scene_id']}.sh"
+            master_body.append(f'bash "{scene_sh_path.resolve()}"')
+
+        # 3b. Generate black spacer script (referencing first scene)
+        first_scene = clip_scenes[0]
+        spacer_mp4_path = scenes_dir / f"{clip_id}-black.mp4"
+        spacer_sh_path = script_dir / f"{clip_id}-black.sh"
+        spacer_cmd = build_black_spacer_cmd(first_scene, spacer_mp4_path)
+
+        spacer_sh_content = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+# ==============================================================================
+# Black Spacer Generation: {clip_id}-black
+# ==============================================================================
+
+echo "==> Generating Black Spacer: {clip_id}-black.mp4"
+{spacer_cmd}
+"""
+        spacer_sh_path.write_text(spacer_sh_content)
+        spacer_sh_path.chmod(0o755)
+
+        # 3c. Add spacer call immediately after scenes in master script
+        master_body.append(f'bash "{spacer_sh_path.resolve()}"')
+        master_body.append("")  # Blank line separator between clips
 
     # 4. Construct master orchestrator (01_extract_scenes.sh)
     master_content = f"""#!/usr/bin/env bash
 set -euo pipefail
 
-# Phase 3: Scene Extraction Pipeline for {vid}
-echo "==> [Phase 3.1] Generating {len(spacer_script_calls)} dimension-matched black spacer(s)..."
-""" + "\n".join(spacer_script_calls) + f"""
+# Phase 3: Scene Extraction & Spacer Pipeline for {vid}
+echo "==> Starting interleaved scene extraction and spacer generation..."
 
-echo "==> [Phase 3.2] Extracting and encoding {len(scenes)} scene(s)..."
-""" + "\n".join(individual_script_calls) + """
-
-echo "==> [Phase 3] Scene extraction completed successfully!"
+""" + "\n".join(master_body) + """
+echo "==> [Phase 3] Scene extractions and black spacers generated successfully!"
 """
 
     master_script_path.write_text(master_content)
