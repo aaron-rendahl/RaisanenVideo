@@ -81,6 +81,13 @@ def setup_directories(base_dir: Path, vid: str) -> dict:
 
     return dirs
 
+# Helper to get a clean display path relative to base_dir
+def rel_path(path: Path, base: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(base.resolve()))
+    except ValueError:
+        return str(path)  # Fallback if path is outside base_dir
+
 
 def main():
     args = parse_args()
@@ -102,13 +109,13 @@ def main():
     # 1. Ingest Metadata
     archive_data: ArchiveData = None
     if spec_path.exists():
-        print(f"--> Reading LosslessCut spec file: {spec_path}")
+        print(f"--> Reading LosslessCut spec file: {rel_path(spec_path, base_dir)}")
         spec_text = spec_path.read_text(encoding="utf-8")
         archive_data = read_tape_spec(spec_text)
         archive_data.print_warnings()
     else:
         print(
-            f"--> Spec file not found at {spec_path}. Attempting MKV embedded metadata import..."
+            f"--> Spec file not found at {spec_path}. \n    Attempting MKV embedded metadata import..."
         )
         archive_data = read_mkv_metadata(master_mkv_path)
 
@@ -228,7 +235,7 @@ echo "=================================================================="
 
     master_script_path.write_text(master_script_content)
     master_script_path.chmod(0o755)
-    print(f"--> Master pipeline script generated at: {master_script_path}")
+    print(f"--> Master pipeline script generated at: {rel_path(master_script_path, base_dir)}")
 
 
 if __name__ == "__main__":
