@@ -120,7 +120,8 @@ def main():
     builder_data = to_builder_data(
         archive=archive_data,
         vid=vid,
-        prep_dir=dirs["prep"].parent,
+        scenes_dir=dirs["scenes"],
+        clips_dir=dirs["clips"],
         master_mkv_path=master_mkv_path,
         overall_title=archive_data.global_date or vid,
         fps=args.fps,
