@@ -1,10 +1,10 @@
 from pathlib import Path
 
 from pipeline.adapters import to_builder_data
-from pipeline.mkv import probe_mkv
+from pipeline.mkv import probe_mkv, read_mkv_metadata
 from pipeline.paths import PipelinePaths
 from pipeline.script_builders import render_all_scripts
-from pipeline.specs import read_mkv_metadata, read_tape_spec
+from pipeline.spec import read_tape_spec
 
 
 def generate_pipeline(
@@ -45,7 +45,7 @@ def generate_pipeline(
         archive=archive_data,
         paths=paths,
         archive_resolution=media_info["resolution"],
-        fps=media_info["fps"],
+        archive_fps=media_info["fps"],
     )
 
     total_scenes = sum(len(c["scenes"]) for c in builder_data["clips"])
