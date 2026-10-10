@@ -15,7 +15,13 @@ def to_builder_data(
     `archive_resolution` (e.g., "720x480") and `fps` (e.g., "30000/1001") are
     required positional arguments probed from the source MKV container.
     """
-    base_w, base_h = parse_res_string(archive_resolution)
+    try:
+        base_w, base_h = map(int, archive_resolution.lower().split("x"))
+    except (ValueError, AttributeError):
+        raise ValueError(
+            f"Invalid source resolution: '{archive_resolution}'. "
+            "Expected 'WxH' string probed from MKV (e.g., '720x480')."
+        )
 
     clips_data = []
     for clip in archive.clips:
