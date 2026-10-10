@@ -23,16 +23,6 @@ def parse_args():
         default=Path("."),
         help="Base working directory containing pipeline folders",
     )
-    parser.add_argument(
-        "--fps",
-        default="30000/1001",
-        help="Target framerate string (default: 30000/1001)",
-    )
-    parser.add_argument(
-        "--resolution",
-        default="720x480",
-        help="Target resolution string (default: 720x480)",
-    )
     return parser.parse_args()
 
 
@@ -44,15 +34,12 @@ def main():
     print("==================================================================")
 
     try:
-        main_sh_path = generate_pipeline(
+        generate_pipeline(
             vid=args.vid,
             base_dir=args.base_dir,
-            fps=args.fps,
-            resolution=args.resolution,
         )
         print("==================================================================")
         print(f" SUCCESS! Pipeline generated successfully.")
-        print(f" To run the pipeline, execute:\n   bash {main_sh_path}")
         print("==================================================================")
     except Exception as e:
         print(f"❌ Error: {e}")
