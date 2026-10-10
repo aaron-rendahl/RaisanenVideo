@@ -2,20 +2,20 @@
 set -euo pipefail
 
 # ==============================================================================
-# Scene Extraction & Encoding Script: {{ scene.scene_id }}
-# Title: {{ scene.title }}
+# Scene Extraction & Encoding Script: {{ scene_idx }}
+# Title: {{ scene_title }}
 # ==============================================================================
 
-MASTER_MKV="{{ scene.master_mkv_path }}"
-TEMP_MKV="{{ scene.temp_mkv_path }}"
-OUT_MP4="{{ scene.out_mp4_path }}"
+MASTER_MKV="{{ path_archive_mkv }}"
+TEMP_MKV="{{ path_temp_mkv }}"
+OUT_MP4="{{ path_scene_mp4 }}"
 
-echo "==> Extracting scene {{ scene.scene_id }} ({{ scene.start_time }} to {{ scene.end_time }})..."
+echo "==> Extracting scene {{ scene_idx }} ({{ start_time }} to {{ end_time }})..."
 
 # 1. Lossless segment extraction
 ffmpeg -y -loglevel warning \
-  -ss {{ scene.start_time }} \
-  -to {{ scene.end_time }} \
+  -ss {{ start_time }} \
+  -to {{ end_time }} \
   -i "$MASTER_MKV" \
   -c copy \
   -avoid_negative_ts make_zero \
@@ -24,7 +24,7 @@ ffmpeg -y -loglevel warning \
 # 2. Normalize and re-encode to archive intermediate standard
 ffmpeg -y -loglevel warning \
   -i "$TEMP_MKV" \
-  -vf "fps={{ scene.fps }},scale={{ scene.resolution }}{% if scene.crop %},crop={{ scene.crop }}{% endif %}" \
+  -vf "fps={{ fps }},scale={{ resolution }}{% if crop %},crop={{ crop }}{% endif %}" \
   -c:v libx264 -crf 22 -preset slow \
   -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m \
   -c:a aac -b:a 192k \

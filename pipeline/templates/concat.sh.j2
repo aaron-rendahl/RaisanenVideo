@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # ==============================================================================
-# Concat & Metadata Script for Clip: {{ clip.clip_id }}
+# Concat & Metadata Script for Clip: {{ clip_idx }}
 # ==============================================================================
 
-CONCAT_TXT="{{ concat_txt_path }}"
-META_TXT="{{ meta_txt_path }}"
-TMP_MP4="{{ tmp_mp4_path }}"
-OUT_MP4="{{ out_mp4_path }}"
+CONCAT_TXT="{{ path_manifest }}"
+META_TXT="{{ path_metadata }}"
+TMP_MP4="{{ path_temp_mp4 }}"
+OUT_MP4="{{ path_clip_mp4 }}"
 
 echo "==> [1/2] Concatenating scenes into temporary stream..."
 ffmpeg -y -loglevel warning \
