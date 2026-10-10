@@ -2,7 +2,7 @@ from typing import Any, Dict
 
 from pipeline.models import ArchiveData
 from pipeline.paths import PipelinePaths
-from pipeline.utils import parse_crop_to_ffmpeg, timestamp_to_seconds
+from pipeline.utils import parse_crop_to_ffmpeg, timestamp_to_seconds, get_effective_resolution
 
 def to_builder_data(
     archive: ArchiveData,
@@ -17,6 +17,7 @@ def to_builder_data(
     for clip in archive.clips:
         raw_crop = clip.crop or archive.global_crop
         clip_crop = parse_crop_to_ffmpeg(raw_crop) if raw_crop else ""
+        clip_res = get_effective_resolution(raw_crop, default_res=resolution)
 
         items = clip.subchapters if clip.subchapters else [clip]
         scenes_data = []
@@ -36,7 +37,7 @@ def to_builder_data(
                     "end_time": item.end,
                     "duration_sec": duration_sec,
                     "crop": clip_crop,
-                    "resolution": resolution,
+                    "resolution": clip_res,
                     "fps": fps,
                     **paths.scene_paths(item),
                 }
@@ -47,6 +48,8 @@ def to_builder_data(
                 "clip_idx": clip.idx,
                 "title": clip.title,
                 "crop": clip_crop,
+                "resolution": clip_res,
+                "fps": fps,
                 "scenes": scenes_data,
                 **paths.clip_paths(clip),
             }
