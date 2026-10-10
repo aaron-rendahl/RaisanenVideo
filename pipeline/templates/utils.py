@@ -28,3 +28,12 @@ def parse_crop_to_ffmpeg(
     y = top
 
     return f"{out_w}:{out_h}:{x}:{y}"
+
+def sanitize(title: str) -> str:
+    """Converts titles into clean, filesystem-safe string segments."""
+    if not title:
+        return "untitled"
+    cleaned = re.sub(r"['’\"]", "", title)
+    cleaned = re.sub(r"[^a-zA-Z0-9\-]", " ", cleaned)
+    cleaned = re.sub(r"\s+", "_", cleaned.strip())
+    return cleaned.strip("_-") or "untitled"
