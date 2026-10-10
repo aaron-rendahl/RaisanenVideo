@@ -68,7 +68,7 @@ class PipelinePaths:
         long_id  = f"{self.vid}-{short_id}"
         return {
             "path_archive_mkv": str(self.path_archive_mkv.resolve()),
-            "path_temp_mkv":    str((self.scenes  / f"{long_id}_TEMP.mkv").resolve()),
+            "path_temp_mkv":    str((self.scenes  / f"{long_id}-TEMP.mkv").resolve()),
             "path_scene_mp4":   str((self.scenes  / f"{long_id}.mp4").resolve()),
             "path_scene_sh":    str((self.scripts / f"{short_id}.sh").resolve()),
         }
@@ -84,6 +84,7 @@ class PipelinePaths:
 
         return {
             "path_clip_mp4":   str((self.clips    / f"{long_id}.mp4").resolve()),
+            "path_temp_mp4":   str((self.scenes   / f"{long_id}-TEMP.mp4").resolve()),            
             "path_spacer_mp4": str((self.scenes   / f"{long_id}-black.mp4").resolve()),
             "path_clip_sh":    str((self.scripts  / f"{short_id}-concat.sh").resolve()),
             "path_spacer_sh":  str((self.scripts  / f"{short_id}-black.sh").resolve()),
