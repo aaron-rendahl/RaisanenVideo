@@ -18,6 +18,7 @@ ffmpeg -y -loglevel warning \
   -to {{ end_time }} \
   -i "$MASTER_MKV" \
   -c copy \
+  -map_chapters -1 \
   -avoid_negative_ts make_zero \
   "$TEMP_MKV"
 
