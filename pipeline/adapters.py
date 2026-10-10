@@ -1,94 +1,58 @@
-import dataclasses
-import re
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from pipeline.models import ArchiveData
-
-def timestamp_to_seconds(ts: str) -> float:
-    """Converts 'HH:MM:SS.mmm' or 'MM:SS.mmm' string to float seconds."""
-    if not ts:
-        return 0.0
-    parts = ts.strip().split(':')
-    if len(parts) == 3:
-        h, m, s = parts
-        return float(h) * 3600 + float(m) * 60 + float(s)
-    elif len(parts) == 2:
-        m, s = parts
-        return float(m) * 60 + float(s)
-    return float(parts[0])
-
-
-def sanitize_filename(title: str) -> str:
-    """Converts titles into clean, filesystem-safe string segments."""
-    if not title:
-        return "untitled"
-    # Replace spaces with underscores and remove non-alphanumeric/hyphen/underscore chars
-    cleaned = re.sub(r'\s+', '_', title.strip())
-    cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', cleaned)
-    return cleaned.strip('_') or "untitled"
+from pipeline.paths import PipelinePaths
+from pipeline.utils import parse_crop_to_ffmpeg, timestamp_to_seconds
 
 def to_builder_data(
     archive: ArchiveData,
-    vid: str,
-    scenes_dir: Path,
-    clips_dir: Path,
-    master_mkv_path: Path,
-    overall_title: str = '',
-    fps: str = '30000/1001',
-    resolution: str = '720x480'
+    paths: PipelinePaths,
+    overall_title: str = "",
+    fps: str = "30000/1001",
+    resolution: str = "720x480",
 ) -> Dict[str, Any]:
     """Transforms ArchiveData into a hierarchical clip-and-scene structure."""
-    abs_master_mkv = str(master_mkv_path.resolve())
 
-    clips = []
-
+    clips_data = []
     for clip in archive.clips:
-        clip_crop = clip.crop or archive.global_crop
-        safe_clip_title = sanitize_filename(clip.title)
+        raw_crop = clip.crop or archive.global_crop
+        clip_crop = parse_crop_to_ffmpeg(raw_crop) if raw_crop else ""
 
-        clip_mp4_path = str((clips_dir / f'{vid}-{clip.idx}_{safe_clip_title}.mp4').resolve())
-        clip_spacer_path = str((scenes_dir / f'{vid}-{clip.idx}_black.mp4').resolve())
-
-        items_to_process = clip.subchapters if clip.subchapters else [clip]
-        clip_scenes = []
-
-        for item in items_to_process:
-            clean_title = sanitize_filename(item.title)
-            scene_id = f'{vid}-{item.idx}-{clean_title}'
-
+        items = clip.subchapters if clip.subchapters else [clip]
+        scenes_data = []
+        for item in items:
             start_sec = timestamp_to_seconds(item.start)
             end_sec = timestamp_to_seconds(item.end)
             duration_sec = max(0.0, end_sec - start_sec)
 
-            temp_mkv_path = str((scenes_dir / f'{scene_id}_temp.mkv').resolve())
-            scene_mp4_path = str((scenes_dir / f'{scene_id}.mp4').resolve())
+            scenes_data.append(
+                {
+                    "video": paths.vid,
+                    "clip_idx": clip.idx,
+                    "clip_title": overall_title or paths.vid,
+                    "scene_idx": item.idx,
+                    "scene_title": item.title,
+                    "start_time": item.start,
+                    "end_time": item.end,
+                    "duration_sec": duration_sec,
+                    "crop": clip_crop,
+                    "resolution": resolution,
+                    "fps": fps,
+                    **paths.scene_paths(item),
+                }
+            )
 
-            clip_scenes.append({
-                'scene_id': scene_id,
-                'master_mkv_path': abs_master_mkv,
-                'start_time': item.start,
-                'end_time': item.end,
-                'duration_sec': duration_sec,
-                'temp_mkv_path': temp_mkv_path,
-                'out_mp4_path': scene_mp4_path,
-                'crop': clip_crop,
-                'title': item.title,
-                'reel_title': overall_title or vid,
-                'resolution': resolution,
-                'fps': fps
-            })
-
-        clips.append({
-            'clip_idx': clip.idx,
-            'title': clip.title,
-            'crop': clip_crop,
-            'black_spacer_path': clip_spacer_path,
-            'out_mp4_path': clip_mp4_path,
-            'scenes': clip_scenes
-        })
+        clips_data.append(
+            {
+                "clip_idx": clip.idx,
+                "title": clip.title,
+                "crop": clip_crop,
+                "scenes": scenes_data,
+                **paths.clip_paths(clip),
+            }
+        )
 
     return {
-        'vid': vid,
-        'clips': clips
+        "path_main_sh": str(paths.path_main_sh.resolve()),
+        "clips": clips_data,
     }
