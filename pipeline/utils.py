@@ -33,6 +33,19 @@ def parse_crop_to_ffmpeg(
 
     return f"{out_w}:{out_h}:{x}:{y}"
 
+def get_effective_resolution(raw_crop: str, default_res: str = "720x480") -> str:
+    """Derives post-crop 'WxH' resolution if a crop string exists, otherwise returns default."""
+    if not raw_crop:
+        return default_res
+
+    # Expects crop format like "crop=w:h:x:y" or "w:h:x:y" or "w:h"
+    match = re.search(r"(?:crop=)?(\d+):(\d+)", raw_crop)
+    if match:
+        w, h = match.groups()
+        return f"{w}x{h}"
+    
+    return default_res
+
 def sanitize(title: str) -> str:
     """Converts titles into clean, filesystem-safe string segments."""
     if not title:
