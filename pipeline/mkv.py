@@ -4,8 +4,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.dom import minidom
-from .models import ArchiveData, Clip, Subchapter
-
+from pipeline.models import ArchiveData, Clip, Subchapter
+from pipeline.utils import parse_crop_string
+s
 def read_mkv_metadata(mkv_path: str | Path) -> ArchiveData:
     """Subprocess I/O wrapper: extracts raw XML chapter/tag strings from an MKV file
     and delegates parsing to parse_mkv_xml_strings.
@@ -181,20 +182,6 @@ def format_mkv_timestamp(ts: str) -> str:
     ms_padded = ms_part.ljust(9, "0")[:9]
 
     return f"{time_part}.{ms_padded}"
-
-
-def parse_crop_string(crop_str: str):
-    """Parses 'Top Bottom Left Right' or 'Top|Bottom|Left|Right' spec string into (top, bottom, left, right)."""
-    if not crop_str:
-        return None
-    try:
-        delimiter = "|" if "|" in crop_str else " "
-        parts = [int(p.strip()) for p in crop_str.split(delimiter) if p.strip()]
-        if len(parts) == 4:
-            return parts[0], parts[1], parts[2], parts[3]
-    except ValueError:
-        pass
-    return None
 
 def generate_mkv_chapters_and_tags(data: ArchiveData):
     """Generates Matroska XML chapters and tags from ArchiveData."""

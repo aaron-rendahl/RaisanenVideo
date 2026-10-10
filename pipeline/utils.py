@@ -1,7 +1,5 @@
 import re
 
-from pipeline.mkv import parse_crop_string
-
 def timestamp_to_seconds(ts: str) -> float:
     """Converts 'HH:MM:SS.mmm' or 'MM:SS.mmm' string to float seconds."""
     if not ts:
@@ -14,6 +12,19 @@ def timestamp_to_seconds(ts: str) -> float:
         m, s = parts
         return float(m) * 60 + float(s)
     return float(parts[0])
+
+def parse_crop_string(crop_str: str):
+    """Parses 'Top Bottom Left Right' or 'Top|Bottom|Left|Right' spec string into (top, bottom, left, right)."""
+    if not crop_str:
+        return None
+    try:
+        delimiter = "|" if "|" in crop_str else " "
+        parts = [int(p.strip()) for p in crop_str.split(delimiter) if p.strip()]
+        if len(parts) == 4:
+            return parts[0], parts[1], parts[2], parts[3]
+    except ValueError:
+        pass
+    return None
 
 def parse_crop_to_ffmpeg(
     crop_str: str,
