@@ -12,7 +12,7 @@ def to_builder_data(
 ) -> Dict[str, Any]:
     """Transforms ArchiveData into a hierarchical clip-and-scene template payload.
 
-    `archive_resolution` (e.g., "720x480") and `fps` (e.g., "30000/1001") are
+    `archive_resolution` (e.g., "720x480") and `archive_fps` (e.g., "30000/1001") are
     required positional arguments probed from the source MKV container.
     """
     try:
@@ -48,7 +48,7 @@ def to_builder_data(
                 "clip_idx": clip.idx,
                 "title": clip.title,
                 "resolution": clip_res,
-                "fps": fps,
+                "fps": archive_fps,
                 "scenes": scenes_data,
                 **paths.clip_paths(clip),
             }
