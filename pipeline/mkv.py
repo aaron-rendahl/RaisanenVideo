@@ -1,12 +1,14 @@
+import json
 import os
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any, Dict
 from xml.dom import minidom
 from pipeline.models import ArchiveData, Clip, Subchapter
 from pipeline.utils import parse_crop_string
-s
+
 def read_mkv_metadata(mkv_path: str | Path) -> ArchiveData:
     """Subprocess I/O wrapper: extracts raw XML chapter/tag strings from an MKV file
     and delegates parsing to parse_mkv_xml_strings.
@@ -381,3 +383,62 @@ def write_mkv_metadata(mkv_path: str, data: ArchiveData) -> None:
 
         subprocess.run(cmd, check=True)
 
+def probe_mkv(mkv_path: Path) -> Dict[str, str]:
+    """Probes an MKV file using ffprobe to extract resolution, FPS, and duration.
+
+    Returns a dict with keys:
+        - "resolution": str ("WxH", e.g., "720x480")
+        - "fps": str (e.g., "30000/1001" or "30/1")
+        - "duration": str ("HH:MM:SS.mmm", e.g., "01:23:45.678")
+    """
+    if not mkv_path.exists():
+        raise FileNotFoundError(f"Source MKV file not found: {mkv_path}")
+
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-print_format", "json",
+        "-show_entries", "stream=width,height,r_frame_rate,avg_frame_rate,codec_type",
+        "-show_entries", "format=duration",
+        str(mkv_path),
+    ]
+
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(res.stdout)
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"Failed to probe MKV file at {mkv_path}: {e}") from e
+
+    # Find the first video stream
+    streams = data.get("streams", [])
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if not video_stream:
+        raise ValueError(f"No video stream found in {mkv_path}")
+
+    width = video_stream.get("width")
+    height = video_stream.get("height")
+    if not width or not height:
+        raise ValueError(f"Could not read frame dimensions from {mkv_path}")
+
+    # Fallback from r_frame_rate to avg_frame_rate if needed
+    fps = video_stream.get("r_frame_rate") or video_stream.get("avg_frame_rate")
+    if not fps or fps == "0/0":
+        raise ValueError(f"Could not read frame rate from {mkv_path}")
+
+    # Parse total duration seconds from format container
+    raw_duration = data.get("format", {}).get("duration")
+    if not raw_duration:
+        raise ValueError(f"Could not read container duration from {mkv_path}")
+
+    total_seconds = float(raw_duration)
+    hours = int(total_seconds // 3600)
+    minutes = int((total_seconds % 3600) // 60)
+    seconds = total_seconds % 60
+
+    duration_str = f"{hours:02d}:{minutes:02d}:{seconds:06.3f}"
+
+    return {
+        "resolution": f"{width}x{height}",
+        "fps": fps,
+        "duration": duration_str,
+    }
