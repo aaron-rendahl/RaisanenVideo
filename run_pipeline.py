@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument(
         "--vid",
         required=True,
-        help="Unique tape identifier (e.g., Raisanen_1987a)",
+        help="Unique tape identifier (e.g., Raisanen-1987a)",
     )
     parser.add_argument(
         "--base-dir",
@@ -44,12 +44,16 @@ def main():
     print("==================================================================")
 
     try:
-        generate_pipeline(
+        main_sh_path = generate_pipeline(
             vid=args.vid,
             base_dir=args.base_dir,
             fps=args.fps,
             resolution=args.resolution,
         )
+        print("==================================================================")
+        print(f" SUCCESS! Pipeline generated successfully.")
+        print(f" To run the pipeline, execute:\n   bash {main_sh_path}")
+        print("==================================================================")
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)
