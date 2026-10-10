@@ -51,12 +51,13 @@ class PipelinePaths:
             if d is not None:
                 d.mkdir(parents=True, exist_ok=True)
 
-    def rel_path(self, path: Path) -> str:
+    def rel_path(self, path: Path | str) -> str:
         """Returns path string relative to project base directory if possible."""
+        p = Path(path) if isinstance(path, str) else path
         try:
-            return str(path.resolve().relative_to(self.base))
+            return str(p.resolve().relative_to(self.base.resolve()))
         except ValueError:
-            return str(path)
+            return str(p)
 
     def scene_paths(
         self, 

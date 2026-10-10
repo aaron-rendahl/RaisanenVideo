@@ -80,8 +80,20 @@ def _write_script(target_path: Path, content: str) -> None:
     target_path.chmod(0o755)
 
 
-def render_all_scripts(data: Dict[str, Any]) -> None:
+def render_all_scripts(data: Dict[str, Any], paths: PipelinePaths) -> None:
     """Generates all shell scripts, concat manifests, and metadata files for a video pipeline."""
+    
+    # Filter resolving paths relative to the scripts directory
+    def script_rel_filter(path_val: str | Path) -> str:
+        p = Path(path_val) if isinstance(path_val, str) else path_val
+        try:
+            return str(p.resolve().relative_to(paths.scripts.resolve()))
+        except ValueError:
+            return str(p)
+
+    # Register both the script dir and the relative filter on the environment
+    jinja_env.globals["script_dir"] = paths.scripts
+    jinja_env.filters["rel_script"] = script_rel_filter
     
     # 1. Render Scene Extraction Scripts
     extract_tmpl = jinja_env.get_template("extract_scene.sh.j2")
@@ -108,11 +120,9 @@ def render_all_scripts(data: Dict[str, Any]) -> None:
             title=clip.get("title", "")
         )
 
-        # Write spacer .sh script
         spacer_sh_path = Path(clip["path_spacer_sh"])
         _write_script(spacer_sh_path, spacer_tmpl.render(**clip))
 
-        # Write concat .sh script
         concat_sh_path = Path(clip["path_clip_sh"])
         _write_script(concat_sh_path, concat_tmpl.render(**clip))
 

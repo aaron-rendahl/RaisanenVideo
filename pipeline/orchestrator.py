@@ -50,7 +50,7 @@ def generate_pipeline(
     print(f"--> Parsed {total_scenes} total scene(s) across {len(builder_data['clips'])} clip(s).")
 
     # 4. Render all scripts, manifests, and metadata text files
-    render_all_scripts(builder_data)
+    render_all_scripts(builder_data, paths)
 
     print(f"--> Main pipeline script generated at: {paths.rel_path(paths.path_main_sh)}")
 

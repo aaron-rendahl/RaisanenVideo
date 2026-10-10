@@ -10,28 +10,23 @@ echo "=================================================================="
 echo " Starting Clip-by-Clip Pipeline for: {{ vid }}"
 echo "=================================================================="
 
+SCRIPT_DIR={{ script_dir }}
+
 {% for clip in clips %}
 # ------------------------------------------------------------------------------
 # CLIP {{ clip.clip_idx }}: {{ clip.title or "Clip " ~ clip.clip_idx }}
 # ------------------------------------------------------------------------------
-echo "==> [START] Processing Clip {{ clip.clip_idx }}/{{ clips|length }}..."
+(
+  echo "==> [START] Processing Clip {{ clip.clip_idx }}/{{ clips|length }}..."
 
-# Step 1: Extract Scenes for Clip {{ clip.clip_idx }}
-{% for scene in clip.scenes %}
-echo "  -> Extracting scene: {{ scene.scene_idx }}..."
-bash "{{ scene.path_scene_sh }}"
-{% endfor %}
+  {% for scene in clip.scenes %}
+  bash "$SCRIPT_DIR/{{ scene.path_scene_sh | rel_script }}"
+  {% endfor %}
 
-# Step 2: Black Spacer for Clip {{ clip.clip_idx }}
-echo "  -> Generating black spacer..."
-bash "{{ clip.path_spacer_sh }}"
-
-# Step 3: Concatenate & Tag Clip {{ clip.clip_idx }}
-echo "  -> Concatenating and tagging..."
-bash "{{ clip.path_clip_sh }}"
-
-echo "==> [COMPLETE] Clip {{ clip.clip_idx }} finished successfully!"
-echo ""
+  bash "$SCRIPT_DIR/{{ clip.path_spacer_sh | rel_script }}"
+  bash "$SCRIPT_DIR/{{ clip.path_clip_sh | rel_script }}"
+  echo "==> [COMPLETE] Clip {{ clip.clip_idx }} finished successfully!\n"
+)
 {% endfor %}
 
 echo "=================================================================="
