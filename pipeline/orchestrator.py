@@ -1,21 +1,18 @@
-# pipeline/orchestrator.py
 from pathlib import Path
 
 from pipeline.adapters import to_builder_data
-from pipeline.mkv import read_mkv_metadata
+from pipeline.mkv import probe_mkv
 from pipeline.paths import PipelinePaths
 from pipeline.script_builders import render_all_scripts
-from pipeline.spec import read_tape_spec
+from pipeline.specs import read_mkv_metadata, read_tape_spec
 
 
 def generate_pipeline(
     vid: str,
     base_dir: Path,
-    fps: str = "30000/1001",
-    resolution: str = "720x480",
 ) -> Path:
     """Orchestrates metadata parsing and generates all sub-scripts and master pipeline runner."""
-    
+
     # 1. Initialize workspace paths & ensure directories exist
     paths = PipelinePaths.from_vid(base_dir, vid)
     paths.ensure_exists()
@@ -37,19 +34,24 @@ def generate_pipeline(
     if not archive_data or not archive_data.clips:
         raise ValueError(f"Failed to load valid clip metadata for {vid}")
 
-    # 3. Transform domain models into Jinja render payload
+    # 3. Probe container media specs from source MKV
+    media_info = probe_mkv(paths.path_archive_mkv)
+
+    # 4. Fill missing trailing end timestamps using container duration
+    archive_data.resolve_missing_end_times(media_info["duration"])
+
+    # 5. Transform domain models into Jinja render payload
     builder_data = to_builder_data(
         archive=archive_data,
         paths=paths,
-        overall_title=archive_data.global_date or vid,
-        fps=fps,
-        resolution=resolution,
+        archive_resolution=media_info["resolution"],
+        fps=media_info["fps"],
     )
 
     total_scenes = sum(len(c["scenes"]) for c in builder_data["clips"])
     print(f"--> Parsed {total_scenes} total scene(s) across {len(builder_data['clips'])} clip(s).")
 
-    # 4. Render all scripts, manifests, and metadata text files
+    # 6. Render all scripts, manifests, and metadata text files
     render_all_scripts(builder_data, paths)
 
     print(f"--> Main pipeline script generated at: {paths.rel_path(paths.path_main_sh)}")
