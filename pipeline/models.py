@@ -1,14 +1,12 @@
 import dataclasses
 from typing import List
 
-
 @dataclasses.dataclass
 class Subchapter:
     idx: str
     start: str
     end: str
     title: str
-
 
 @dataclasses.dataclass
 class Clip:
@@ -19,7 +17,6 @@ class Clip:
     date: str
     crop: str
     subchapters: List[Subchapter] = dataclasses.field(default_factory=list)
-
 
 @dataclasses.dataclass
 class ArchiveData:
