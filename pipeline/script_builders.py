@@ -6,6 +6,7 @@ script_builders.py - Manifest & Shell Script Writers for Video Pipeline
 from pathlib import Path
 from typing import Any, Dict, List
 from jinja2 import Environment, FileSystemLoader
+from pipeline.utils import timestamp_to_seconds
 
 # Set up Jinja2 environment pointing to pipeline/templates
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -51,7 +52,9 @@ def build_ffmetadata_file(
     current_time_ms = 0
 
     for scene in scenes:
-        duration_ms = int(round(scene['duration_sec'] * 1000))
+        start_sec = timestamp_to_seconds(scene['start_time'])
+        end_sec = timestamp_to_seconds(scene['end_time'])
+        duration_ms = int(round((end_sec - start_sec) * 1000))
         start_ms = current_time_ms
         end_ms = start_ms + duration_ms
         chapter_title = scene.get('scene_title', f"Scene {scene.get('scene_idx', '')}")
