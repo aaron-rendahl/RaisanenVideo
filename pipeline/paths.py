@@ -1,8 +1,8 @@
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from pipeline.models import Clip, Subchapter
+from pipeline.utils import sanitize
 
 @dataclass
 class PipelinePaths:

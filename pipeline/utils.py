@@ -1,3 +1,7 @@
+import re
+
+from pipeline.mkv import parse_crop_string
+
 def timestamp_to_seconds(ts: str) -> float:
     """Converts 'HH:MM:SS.mmm' or 'MM:SS.mmm' string to float seconds."""
     if not ts:
